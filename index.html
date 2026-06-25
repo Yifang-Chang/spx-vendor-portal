@@ -353,7 +353,7 @@ const ACTION = {
    ============================================================================ */
 // TODO: 串接 — 部署 Apps Script Web App（設定為「以我的身分執行 / 任何人可存取」）後，
 //        把產生的 /exec 網址貼到這裡。未填時前端無法登入（不再有任何前端假帳密）。
-const API_URL = 'https://script.google.com/macros/s/AKfycbwl9qV7kX1SGXi22mzdSB8ZQrj6Uk1T0yIEU-q2cBLJm_g9ayy_8WO2NYRoeu1yqHji/exec'; // 例：'https://script.google.com/macros/s/AKfycbx5le57iFWoGoGllxfXiOQOWerObpgNPJ6kVMZ6AFyRqR1NTZtI0-lOk2RIRIT7qLPh/exec'
+const API_URL = ''; // 例：'https://script.google.com/macros/s/AKfycbxxxxxxxx/exec'
 
 /* ============================================================================
    區塊 2：模擬資料 (日後改由 Google Sheets 讀取)
@@ -594,25 +594,29 @@ function storeRowActions(store){
 }
 
 function renderStoreTable(tableId){
-  // 依門市狀態排序：🔥 急徵 → 🟢 開放招募 → ⚪ 規劃中 → ✅ 已補齊
+  // 排序：先看 Priority（數字越小越前面，空白＝999），同 Priority 再依門市狀態
+  // 🔥 急徵 → 🟢 開放招募 → ⚪ 規劃中 → ✅ 已補齊
   const STATUS_ORDER = { urgent:0, open:1, planning:2, filled:3 };
-  const rows = applyFilters(stores).slice().sort((a,b)=> (STATUS_ORDER[a.status]??9) - (STATUS_ORDER[b.status]??9));
+  const rows = applyFilters(stores).slice().sort((a,b)=>
+    ((a.priority??999) - (b.priority??999)) || ((STATUS_ORDER[a.status]??9) - (STATUS_ORDER[b.status]??9)));
   const head = `<thead><tr>
-    <th>門市</th><th>城市</th><th>地區</th><th>類型</th><th>預估貨量</th><th>需求人數</th>
-    <th>門市狀態</th><th>招募進度</th><th>預計開店日</th><th>備註</th><th>操作</th></tr></thead>`;
+    <th>門市名稱</th><th>地址</th><th>城市</th><th>地區</th><th>門市類型</th><th>預估貨量</th><th>需求人數</th>
+    <th>門市狀態</th><th>招募進度</th><th>預計開店日</th><th>Priority</th><th>備註</th><th>操作</th></tr></thead>`;
   const body = rows.length ? rows.map(s=>{
     const st = STORE_STATUS[s.status];
     return `<tr>
-      <td><b>${s.name}</b><br><span style="color:var(--text-soft);font-size:11px">${s.id}</span></td>
+      <td><b>${s.name}</b></td>
+      <td class="note-cell">${s.address || '—'}</td>
       <td>${s.city}</td><td>${s.district}</td><td>${s.type}</td>
       <td>${s.volume.toLocaleString()}</td><td>${s.need}</td>
       <td><span class="tag ${st.cls}">${st.label}</span></td>
       <td>${progressLabel(s).html}</td>
       <td>${s.openDate}</td>
+      <td>${s.priority===999?'—':s.priority}</td>
       <td class="note-cell">${s.remark || '—'}</td>
       <td><div class="btn-group">${storeRowActions(s)}</div></td>
     </tr>`;
-  }).join('') : `<tr><td colspan="11" class="empty">沒有符合條件的門市</td></tr>`;
+  }).join('') : `<tr><td colspan="13" class="empty">沒有符合條件的門市</td></tr>`;
   document.getElementById(tableId).innerHTML = head + `<tbody>${body}</tbody>`;
 }
 
@@ -712,7 +716,7 @@ function renderReview(){
   let list = applications.filter(a => reviewTab==='all' ? true : a.action===reviewTab);
   // 待審優先排序
   list = list.slice().sort((a,b)=> (a.status==='pending'?0:1) - (b.status==='pending'?0:1));
-  const head = `<thead><tr><th>申請時間</th><th>供應商</th><th>Store ID</th><th>門市</th><th>申請動作</th><th>備註</th><th>狀態</th><th>操作</th></tr></thead>`;
+  const head = `<thead><tr><th>申請時間</th><th>供應商</th><th>門市</th><th>地址</th><th>申請動作</th><th>備註</th><th>狀態</th><th>操作</th></tr></thead>`;
   const body = list.length ? list.map(a=>{
     const s = getStore(a.storeId);
     const statusTag = a.status==='pending' ? '<span class="tag yellow">待審</span>'
@@ -722,7 +726,7 @@ function renderReview(){
          <button class="btn danger sm" onclick="reject('${a.id}')">拒絕</button></div>`
       : `<span style="color:var(--text-soft)">${a.reviewer||''}</span>`;
     return `<tr>
-      <td>${a.time}</td><td><b>${a.supplier}</b></td><td>${a.storeId}</td><td>${s?s.name:'-'}</td>
+      <td>${a.time}</td><td><b>${a.supplier}</b></td><td>${s?s.name:'-'}</td><td class="note-cell">${a.storeId}</td>
       <td><span class="tag blue">${ACTION[a.action]}</span></td>
       <td class="note-cell">${a.note||'—'}${a.candidateCount?`<br>人選數：${a.candidateCount}`:''}${a.onboardDate?`<br>報到：${a.onboardDate} ${a.onboardTime||''}`:''}</td>
       <td>${statusTag}</td><td>${ops}</td>
@@ -735,12 +739,12 @@ function renderReview(){
    區塊 12：渲染 — 歷史紀錄
    ============================================================================ */
 function renderHistory(){
-  const head = `<thead><tr><th>時間</th><th>供應商</th><th>Store ID</th><th>門市</th><th>動作</th><th>核准狀態</th><th>核准人</th><th>備註</th></tr></thead>`;
+  const head = `<thead><tr><th>時間</th><th>供應商</th><th>門市</th><th>地址</th><th>動作</th><th>核准狀態</th><th>核准人</th><th>備註</th></tr></thead>`;
   const list = history.slice().reverse();
   const body = list.length ? list.map(h=>{
     const s = getStore(h.storeId);
     const cls = h.approved==='核准' ? 'green' : h.approved==='拒絕' ? 'red' : 'grey';
-    return `<tr><td>${h.time}</td><td>${h.supplier}</td><td>${h.storeId}</td><td>${s?s.name:'-'}</td>
+    return `<tr><td>${h.time}</td><td>${h.supplier}</td><td>${s?s.name:'-'}</td><td class="note-cell">${h.storeId}</td>
       <td><span class="tag blue">${ACTION[h.action]||h.action}</span></td>
       <td><span class="tag ${cls}">${h.approved}</span></td><td>${h.reviewer}</td><td class="note-cell">${h.note||'—'}</td></tr>`;
   }).join('') : `<tr><td colspan="8" class="empty">尚無歷史紀錄</td></tr>`;
@@ -853,7 +857,7 @@ async function submitApplication(storeId, action){
   try {
     const res = await apiCall('submitRequest', {
       vendor_id: currentVendorId, vendor_name: currentVendorName,
-      store_id: storeId, action, note
+      address: storeId, action, note
     });
     if (!res.success){ toast('⚠️ 送出失敗：' + (res.message||'')); return; }
     alert('已送出申請，營運將收到 SeaTalk 通知。');
@@ -874,7 +878,7 @@ async function submitReport(recId, action){
   try {
     const res = await apiCall('submitRequest', {
       vendor_id: currentVendorId, vendor_name: currentVendorName,
-      store_id: r.storeId, action, note,
+      address: r.storeId, action, note,
       candidate_count: candidateCount,
       onboard_date: onboardDateRaw ? onboardDateRaw.replaceAll('-','/') : '',
       onboard_time: onboardTime
@@ -915,7 +919,7 @@ async function reject(appId){
 async function opsComplete(storeId){
   if (!confirm('確認此門市招募完成？將標記為 ✅ 招募完成 / 已補齊，並停止所有新申請。')) return;
   try {
-    const res = await apiCall('complete', { store_id: storeId, reviewer: reviewerName() });
+    const res = await apiCall('complete', { address: storeId, reviewer: reviewerName() });
     if (!res.success){ toast('⚠️ 操作失敗：' + (res.message||'')); return; }
     toast('🎉 招募完成');
     await loadServerData();
@@ -1004,14 +1008,27 @@ async function loadServerData(){
 
 // ---- 後端欄位 → 前端欄位 對應 ----
 function mapServerStore(s){
-  return { id:s.store_id, city:s.city, district:s.district, name:s.name, type:s.type,
-    volume:Number(s.volume)||0, need:Number(s.need)||0, status:s.status, stage:s.stage,
-    openDate:s.open_date, remark:s.remark||'',
-    activeCount:Number(s.active_count)||0, waitlistCount:Number(s.waitlist_count)||0 };
+  return {
+    id: s.address,            // 以地址作為唯一識別（前端沿用 id 變數名）
+    address: s.address,
+    city: s.city,
+    district: s.district,
+    name: s.name,
+    type: s.type,
+    volume: Number(s.volume) || 0,
+    need: Number(s.need) || 0,
+    status: s.status,
+    stage: s.stage,
+    openDate: s.open_date,
+    remark: s.remark || '',
+    priority: Number(s.priority) || 999,
+    activeCount: Number(s.active_count) || 0,
+    waitlistCount: Number(s.waitlist_count) || 0
+  };
 }
 function mapServerRequest(r){
   return { id:r.request_id, time:r.request_time, supplier:r.vendor_name, vendorId:r.vendor_id,
-    storeId:r.store_id, action:r.action,
+    storeId:r.address, action:r.action,   // storeId 內容即 address
     status:(r.status||'').toLowerCase(),                 // Pending/Approved/Rejected → pending/...
     note:r.note||'', candidateCount:Number(r.candidate_count)||0,
     onboardDate:r.onboard_date||'', onboardTime:r.onboard_time||'',
@@ -1020,7 +1037,7 @@ function mapServerRequest(r){
 }
 function mapServerLog(l){
   const resultMap = { Approved:'核准', Rejected:'拒絕', Released:'釋出', Completed:'完成' };
-  return { time:l.log_time, supplier:l.vendor_name, storeId:l.store_id, action:l.action,
+  return { time:l.log_time, supplier:l.vendor_name, storeId:l.address, action:l.action,
     approved: resultMap[l.result] || l.result, reviewer:l.reviewer, note:l.note||'' };
 }
 
