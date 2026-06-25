@@ -310,7 +310,7 @@
     <div class="field"><label>帳號</label><input id="loginUser" placeholder="帳號" autocomplete="username"></div>
     <div class="field"><label>密碼</label><input id="loginPass" type="password" placeholder="密碼" autocomplete="current-password"></div>
     <div class="login-err" id="loginErr"></div>
-    <button class="btn primary" style="width:100%;padding:11px;" onclick="doLogin()">登入</button>
+    <button class="btn primary" id="loginBtn" style="width:100%;padding:11px;" onclick="doLogin()">登入</button>
     <div class="login-hint" id="loginHint"></div>
   </div>
 </div>
@@ -349,6 +349,19 @@ const ACTION = {
 };
 
 /* ============================================================================
+   區塊 1-1：後端 API 設定
+   ============================================================================ */
+// TODO: 串接 — 部署 Apps Script Web App（設定為「以我的身分執行 / 任何人可存取」）後，
+//        把產生的 /exec 網址貼到這裡。本機測試時若留空，會 fallback 到下方 DEMO 帳號。
+const API_URL = ''; // 例：'https://script.google.com/macros/s/AKfycbxxxxxxxx/exec'
+
+// 僅供「尚未填 API_URL」時的離線展示用；正式串接後此區塊不會被使用，可整段刪除。
+const DEMO_ACCOUNTS = [
+  { username:'vendor_a', password:'1234',  role:'supplier', vendor_id:'V001', vendor_name:'材霈',     display_name:'材霈供應商' },
+  { username:'ops',      password:'admin', role:'ops',      vendor_id:'',     vendor_name:'',         display_name:'Yifang' },
+];
+
+/* ============================================================================
    區塊 2：模擬資料 (日後改由 Google Sheets 讀取)
    TODO: 串接 — 把以下 array 改成 fetch(APPS_SCRIPT_URL) 取得的資料
    ============================================================================ */
@@ -365,17 +378,8 @@ const CITY_DISTRICTS = {
 // 供應商（至少 5 家）
 let SUPPLIERS = ['宏運物流', '速達人力', '全聯運能', '台灣宅配通', '優選派遣'];
 
-// 帳號密碼（模擬 Google Sheet 的「帳號密碼」分頁）
-// TODO: 串接 — 改為從 Apps Script 讀取「帳號密碼」分頁，密碼建議在後端比對，不要明文放前端。
-//   分頁欄位建議：帳號 username | 密碼 password | 角色 role(supplier/ops) | 供應商 supplier | 顯示名稱 displayName
-let ACCOUNTS = [
-  { username:'hongyun', password:'1234',  role:'supplier', supplier:'宏運物流',   displayName:'宏運物流' },
-  { username:'suda',    password:'1234',  role:'supplier', supplier:'速達人力',   displayName:'速達人力' },
-  { username:'pxlogi',  password:'1234',  role:'supplier', supplier:'全聯運能',   displayName:'全聯運能' },
-  { username:'taiwan',  password:'1234',  role:'supplier', supplier:'台灣宅配通', displayName:'台灣宅配通' },
-  { username:'youxuan', password:'1234',  role:'supplier', supplier:'優選派遣',   displayName:'優選派遣' },
-  { username:'ops',     password:'admin', role:'ops',      supplier:'',           displayName:'營運人員 (Ops)' },
-];
+// ⚠️ 帳號密碼已不再寫死在前端，改由 Apps Script 後端驗證（見下方 API_URL 與 doLogin）。
+// 帳密存放於 Google Sheet 的「Account_Master」分頁，前端完全不持有帳密清單。
 
 // Store_Master（至少 8 間門市）
 // stage = 招募進度 key；status = 門市狀態 key
@@ -423,9 +427,11 @@ let history = [
   { time:'2026/06/23 16:05', supplier:'宏運物流', storeId:'HD002', action:'apply',    approved:'核准', reviewer:'Ops-Ben', note:'核准開始招募，保留 7 天' },
 ];
 
-// 目前登入身份：null = 尚未登入；登入後為供應商名稱字串，或 'ops'
-let currentRole = null;           // 由登入決定
-let currentUser = null;           // 目前登入的帳號物件
+// 目前登入身份：null = 尚未登入。以下皆由 Apps Script 登入回傳後設定，前端不再持有帳密。
+let currentRole = null;           // 'ops' 或供應商身份（= vendor_name，沿用既有資料以 vendor_name 為 key）
+let currentUser = null;           // 登入回傳的完整使用者物件
+let currentVendorId = '';         // 登入者的 vendor_id（供應商才有）
+let currentVendorName = '';       // 登入者的 vendor_name（供應商才有）
 let reviewTab = 'all';            // 待審清單目前 tab
 let idSeq = 100;                  // 流水號產生器
 
@@ -465,9 +471,10 @@ function progressLabel(store){
 }
 // 判斷某門市是否仍可「申請招募」
 function canApply(store){
-  if (['filled'].includes(store.status)) return false;
-  if (['onboard','completed'].includes(store.stage)) return false; // 報到 / 完成 後關閉
-  return true;
+  if (store.status === 'filled') return false;
+  // 只有「尚無供應商開始招募」(🟢 尚未開始) 時才開放申請；
+  // 一旦已有供應商開始 / 確認人選 / 確認報到，其他供應商改走「加入候補」。
+  return store.stage === 'not_started';
 }
 // 判斷是否可「加入候補」：已有人保留但尚未進入 onboard
 function canWaitlist(store){
@@ -877,12 +884,12 @@ function openOnboard(recId){
    區塊 15：供應商送出 — 新申請 / 進度回報
    ============================================================================ */
 function submitApplication(storeId, action){
-  // 供應商名稱一律取自登入身份，前端無法竄改
-  const supplier = isOps() ? '' : currentRole;
+  // 供應商身份（vendor_id / vendor_name）一律取自登入回傳，前端無法竄改
+  const supplier = isOps() ? '' : currentVendorName;
   if (!supplier){ alert('請以供應商身份登入後再申請。'); return; }
   const note = document.getElementById('m_note')?.value || '';
   if (hasPending(supplier, storeId)){ alert('此門市已有一筆待審申請，請等待營運處理。'); return; }
-  applications.push({ id: nextId('A'), time: nowStr(), supplier, storeId, action, status:'pending',
+  applications.push({ id: nextId('A'), time: nowStr(), supplier, vendorId: currentVendorId, storeId, action, status:'pending',
     note, candidateCount:0, onboardDate:'', onboardTime:'', accountStatus:'', reviewer:'' });
   const s = getStore(storeId);
   const msg = `📢 新增待審申請\n供應商：${supplier}\n門市：${s.name}\n動作：${ACTION[action]}\n時間：${nowStr()}\n請至待審清單核准。`;
@@ -1005,24 +1012,60 @@ function opsRelease(recId){
 /* ============================================================================
    區塊 18：身份切換
    ============================================================================ */
-// 登入：驗證帳密 → 設定身份 → 進入系統
-// TODO: 串接 — 改為呼叫 Apps Script 驗證帳密，成功後回傳角色與供應商名稱。
-function doLogin(){
+// 登入：呼叫 Apps Script 後端驗證帳密 → 設定身份 → 進入系統
+// 流程：前端送 ?action=login&username=&password= → 後端比對 Account_Master（且 status=Active）
+//       → 回傳 { success, role, vendor_id, vendor_name, display_name }（或 success:false + message）
+async function doLogin(){
   const u = document.getElementById('loginUser').value.trim();
   const p = document.getElementById('loginPass').value;
-  const acc = ACCOUNTS.find(a => a.username===u && a.password===p);
-  if (!acc){ document.getElementById('loginErr').textContent = '帳號或密碼錯誤，請重新輸入。'; return; }
-  currentUser = acc;
-  currentRole = acc.role==='ops' ? 'ops' : acc.supplier; // 身份由登入決定，不可自選
-  document.getElementById('loginErr').textContent = '';
-  document.getElementById('loginPass').value = '';
-  document.getElementById('userInfo').textContent = acc.displayName + (acc.role==='ops' ? '' : '（供應商）');
-  document.getElementById('loginMask').classList.add('hide');
-  gotoPage('dashboard');
+  const errEl = document.getElementById('loginErr');
+  const btn = document.getElementById('loginBtn');
+  if (!u || !p){ errEl.textContent = '請輸入帳號與密碼。'; return; }
+  errEl.textContent = ''; btn.disabled = true; btn.textContent = '登入中…';
+  try {
+    const res = await apiLogin(u, p);          // 呼叫後端（見下方 apiLogin）
+    if (!res || !res.success){
+      errEl.textContent = (res && res.message) ? res.message : '帳號或密碼錯誤，請重新輸入。';
+      return;
+    }
+    // 登入成功：身份完全由後端回傳決定，前端不可自選 / 竄改
+    currentUser       = res;
+    currentRole       = res.role === 'ops' ? 'ops' : res.vendor_name; // 供應商以 vendor_name 當識別 key
+    currentVendorId   = res.vendor_id   || '';
+    currentVendorName = res.vendor_name || '';
+    document.getElementById('loginPass').value = '';
+    document.getElementById('userInfo').textContent =
+      (res.display_name || res.vendor_name || u) + (res.role === 'ops' ? '' : '（供應商）');
+    document.getElementById('loginMask').classList.add('hide');
+    gotoPage('dashboard');
+  } catch (e){
+    console.error(e);
+    errEl.textContent = '無法連線到伺服器，請稍後再試。';
+  } finally {
+    btn.disabled = false; btn.textContent = '登入';
+  }
 }
+
+// 呼叫後端登入 API。
+// TODO: 串接 — 填好上方 API_URL 後即會走真正的 Apps Script；未填時用 DEMO_ACCOUNTS 離線展示。
+async function apiLogin(username, password){
+  if (!API_URL){
+    // ---- 離線 DEMO 模式（正式串接後可刪除整個 if 區塊）----
+    await new Promise(r => setTimeout(r, 200)); // 模擬網路延遲
+    const a = DEMO_ACCOUNTS.find(x => x.username===username && x.password===password);
+    return a ? { success:true, role:a.role, vendor_id:a.vendor_id, vendor_name:a.vendor_name, display_name:a.display_name }
+             : { success:false, message:'帳號或密碼錯誤（DEMO）' };
+  }
+  // ---- 正式模式：呼叫 Apps Script Web App ----
+  // 用 GET + query string，屬於 CORS 簡單請求，不會觸發 preflight。
+  const url = `${API_URL}?action=login&username=${encodeURIComponent(username)}&password=${encodeURIComponent(password)}`;
+  const resp = await fetch(url, { method:'GET' });
+  return await resp.json();
+}
+
 // 登出：清除身份，回到登入畫面
 function logout(){
-  currentUser = null; currentRole = null;
+  currentUser = null; currentRole = null; currentVendorId = ''; currentVendorName = '';
   document.getElementById('loginUser').value = '';
   document.getElementById('loginPass').value = '';
   document.getElementById('loginErr').textContent = '';
@@ -1031,8 +1074,10 @@ function logout(){
 // 登入畫面：Enter 鍵送出 + Demo 帳號提示
 document.getElementById('loginPass').addEventListener('keydown', e=>{ if(e.key==='Enter') doLogin(); });
 document.getElementById('loginUser').addEventListener('keydown', e=>{ if(e.key==='Enter') doLogin(); });
-document.getElementById('loginHint').innerHTML =
-  '<b>Demo 測試帳號</b><br>供應商：hongyun / suda / pxlogi / taiwan / youxuan（密碼皆 1234）<br>營運：ops（密碼 admin）';
+// Demo 帳號提示：僅在尚未設定 API_URL（離線模式）時顯示
+document.getElementById('loginHint').innerHTML = API_URL
+  ? '帳密由後端 Account_Master 驗證。'
+  : '<b>離線 DEMO 帳號（尚未串接後端）</b><br>供應商：vendor_a（密碼 1234）<br>營運：ops（密碼 admin）';
 
 /* ============================================================================
    區塊 19：總渲染
