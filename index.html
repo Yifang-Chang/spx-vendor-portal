@@ -353,7 +353,7 @@ const ACTION = {
    ============================================================================ */
 // TODO: 串接 — 部署 Apps Script Web App（設定為「以我的身分執行 / 任何人可存取」）後，
 //        把產生的 /exec 網址貼到這裡。未填時前端無法登入（不再有任何前端假帳密）。
-const API_URL = ''; // 例：'https://script.google.com/macros/s/AKfycbwUPcRMkhiWGZpH5UfMemytVsZMK8Kn3Ttgie_PPbfZpK3qfrMwGYP-IhQJAqeBwAU3/exec'
+const API_URL = ''; // 例：'https://script.google.com/macros/s/AKfycbxxxxxxxx/exec'
 
 /* ============================================================================
    區塊 2：模擬資料 (日後改由 Google Sheets 讀取)
@@ -599,7 +599,7 @@ function renderStoreTable(tableId){
   const rows = applyFilters(stores).slice().sort((a,b)=> (STATUS_ORDER[a.status]??9) - (STATUS_ORDER[b.status]??9));
   const head = `<thead><tr>
     <th>門市</th><th>城市</th><th>地區</th><th>類型</th><th>預估貨量</th><th>需求人數</th>
-    <th>門市狀態</th><th>招募進度</th><th>預計開店日</th><th>操作</th></tr></thead>`;
+    <th>門市狀態</th><th>招募進度</th><th>預計開店日</th><th>備註</th><th>操作</th></tr></thead>`;
   const body = rows.length ? rows.map(s=>{
     const st = STORE_STATUS[s.status];
     return `<tr>
@@ -609,9 +609,10 @@ function renderStoreTable(tableId){
       <td><span class="tag ${st.cls}">${st.label}</span></td>
       <td>${progressLabel(s).html}</td>
       <td>${s.openDate}</td>
+      <td class="note-cell">${s.remark || '—'}</td>
       <td><div class="btn-group">${storeRowActions(s)}</div></td>
     </tr>`;
-  }).join('') : `<tr><td colspan="10" class="empty">沒有符合條件的門市</td></tr>`;
+  }).join('') : `<tr><td colspan="11" class="empty">沒有符合條件的門市</td></tr>`;
   document.getElementById(tableId).innerHTML = head + `<tbody>${body}</tbody>`;
 }
 
