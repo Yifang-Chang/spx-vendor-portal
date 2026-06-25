@@ -1,0 +1,1010 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>供應商門市招募平台</title>
+<!--
+  ============================================================================
+  供應商門市招募平台 (Supplier Store Recruitment Platform)
+  ----------------------------------------------------------------------------
+  純前端單頁 HTML，可直接部署到 GitHub Pages。
+  資料目前以 JavaScript Array 模擬，日後可替換為：
+    - Google Sheets (透過 Apps Script Web App 當作 REST API)
+    - SeaTalk Webhook (替換 sendSeaTalkNotification 內部實作)
+
+  ★ 串接重點都已用「TODO: 串接」註解標記，搜尋 "TODO: 串接" 即可找到。
+  ============================================================================
+-->
+<style>
+  /* ====================== 基礎變數與重置 ====================== */
+  :root {
+    --bg: #f4f5f7;
+    --surface: #ffffff;
+    --border: #e3e6ea;
+    --text: #1f2733;
+    --text-soft: #6b7280;
+    --primary: #ee4d2d;      /* Shopee 主色 */
+    --primary-dark: #d8431f;
+    --primary-soft: #fff1ec;
+    --sidebar: #1f2733;
+    --sidebar-soft: #2c3645;
+    --shadow: 0 1px 3px rgba(0,0,0,.08), 0 1px 2px rgba(0,0,0,.04);
+    /* 狀態色 */
+    --red: #e53935;     --red-bg: #fdecea;
+    --green: #2e9e5b;   --green-bg: #e7f5ed;
+    --grey: #6b7280;    --grey-bg: #eef0f2;
+    --yellow: #d99100;  --yellow-bg: #fff6e0;
+    --orange: #e07a1f;  --orange-bg: #fff0e0;
+    --blue: #2563eb;    --blue-bg: #e8f0fe;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, "Segoe UI", "PingFang TC", "Microsoft JhengHei", Roboto, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    font-size: 14px;
+    line-height: 1.5;
+  }
+  /* ====================== 版面結構 ====================== */
+  .layout { display: flex; min-height: 100vh; }
+  .sidebar {
+    width: 230px; background: var(--sidebar); color: #cfd6e0;
+    display: flex; flex-direction: column; flex-shrink: 0;
+    position: sticky; top: 0; height: 100vh;
+  }
+  .sidebar .brand {
+    padding: 20px 18px; font-size: 16px; font-weight: 700; color: #fff;
+    border-bottom: 1px solid var(--sidebar-soft); line-height: 1.3;
+  }
+  .sidebar .brand small { display:block; font-weight:400; font-size:11px; color:#8b97a8; margin-top:3px; }
+  .nav { flex: 1; padding: 10px 0; overflow-y: auto; }
+  .nav button {
+    display: flex; align-items: center; gap: 10px; width: 100%;
+    background: none; border: none; color: #cfd6e0; cursor: pointer;
+    padding: 11px 18px; font-size: 14px; text-align: left; border-left: 3px solid transparent;
+  }
+  .nav button:hover { background: var(--sidebar-soft); color: #fff; }
+  .nav button.active { background: var(--sidebar-soft); color: #fff; border-left-color: var(--primary); font-weight: 600; }
+  .nav button .badge { margin-left: auto; background: var(--primary); color:#fff; border-radius: 10px; font-size: 11px; padding: 1px 7px; }
+  .role-box { padding: 14px 18px; border-top: 1px solid var(--sidebar-soft); font-size: 12px; }
+  .role-box label { color:#8b97a8; display:block; margin-bottom:5px; }
+  .role-box select { width: 100%; padding: 6px; border-radius: 6px; border: 1px solid var(--sidebar-soft); background: var(--sidebar-soft); color: #fff; }
+  .role-box select option { color:#000; }
+
+  .main { flex: 1; min-width: 0; }
+  .topbar {
+    background: var(--surface); border-bottom: 1px solid var(--border);
+    padding: 14px 24px; display: flex; align-items: center; gap: 14px;
+    position: sticky; top: 0; z-index: 20;
+  }
+  .topbar h1 { font-size: 18px; }
+  .topbar .who { margin-left:auto; font-size:12px; color: var(--text-soft); }
+  .topbar .who b { color: var(--text); }
+  .menu-toggle { display:none; background:none; border:1px solid var(--border); border-radius:6px; padding:6px 10px; cursor:pointer; font-size:16px; }
+  .content { padding: 24px; max-width: 1400px; }
+
+  /* ====================== KPI Cards ====================== */
+  .kpi-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 14px; margin-bottom: 22px; }
+  .kpi {
+    background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
+    padding: 16px 18px; box-shadow: var(--shadow);
+  }
+  .kpi .label { color: var(--text-soft); font-size: 12px; margin-bottom: 6px; }
+  .kpi .value { font-size: 26px; font-weight: 700; }
+  .kpi.accent .value { color: var(--primary); }
+
+  /* ====================== 篩選列 ====================== */
+  .filters {
+    background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
+    padding: 14px; margin-bottom: 18px; display: flex; flex-wrap: wrap; gap: 10px; align-items: flex-end;
+  }
+  .filters .field { display: flex; flex-direction: column; gap: 4px; }
+  .filters .field label { font-size: 11px; color: var(--text-soft); }
+  .filters select, .filters input {
+    padding: 7px 9px; border: 1px solid var(--border); border-radius: 6px; font-size: 13px; background:#fff; min-width: 120px;
+  }
+  .filters .reset { align-self: flex-end; }
+
+  /* ====================== 表格 ====================== */
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; box-shadow: var(--shadow); overflow: hidden; margin-bottom: 18px; }
+  .card .card-head { padding: 14px 18px; border-bottom: 1px solid var(--border); font-weight: 600; display:flex; align-items:center; gap:10px; }
+  .table-wrap { overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { padding: 11px 14px; text-align: left; border-bottom: 1px solid var(--border); white-space: nowrap; }
+  th { background: #fafbfc; color: var(--text-soft); font-weight: 600; font-size: 12px; position: sticky; top: 0; }
+  tbody tr:hover { background: #fafbfc; }
+  td.note-cell { white-space: normal; max-width: 220px; color: var(--text-soft); }
+  .empty { padding: 30px; text-align: center; color: var(--text-soft); }
+
+  /* ====================== 標籤 / Badge ====================== */
+  .tag { display: inline-block; padding: 3px 9px; border-radius: 20px; font-size: 12px; font-weight: 600; white-space: nowrap; }
+  .tag.red { background: var(--red-bg); color: var(--red); }
+  .tag.green { background: var(--green-bg); color: var(--green); }
+  .tag.grey { background: var(--grey-bg); color: var(--grey); }
+  .tag.yellow { background: var(--yellow-bg); color: var(--yellow); }
+  .tag.orange { background: var(--orange-bg); color: var(--orange); }
+  .tag.blue { background: var(--blue-bg); color: var(--blue); }
+  .tag.expired { background: var(--red-bg); color: var(--red); border: 1px dashed var(--red); }
+
+  /* ====================== 按鈕 ====================== */
+  .btn { padding: 6px 12px; border-radius: 6px; border: 1px solid var(--border); background: #fff; cursor: pointer; font-size: 13px; color: var(--text); }
+  .btn:hover { background: #f4f5f7; }
+  .btn.primary { background: var(--primary); border-color: var(--primary); color: #fff; }
+  .btn.primary:hover { background: var(--primary-dark); }
+  .btn.success { background: var(--green); border-color: var(--green); color: #fff; }
+  .btn.danger { background: #fff; border-color: var(--red); color: var(--red); }
+  .btn.danger:hover { background: var(--red-bg); }
+  .btn.sm { padding: 4px 9px; font-size: 12px; }
+  .btn:disabled { opacity: .5; cursor: not-allowed; }
+  .btn-group { display: flex; gap: 6px; flex-wrap: wrap; }
+
+  /* ====================== Tabs ====================== */
+  .tabs { display: flex; gap: 4px; flex-wrap: wrap; margin-bottom: 16px; }
+  .tabs button { padding: 8px 14px; border: 1px solid var(--border); background: #fff; border-radius: 8px; cursor: pointer; font-size: 13px; }
+  .tabs button.active { background: var(--primary); color: #fff; border-color: var(--primary); }
+  .tabs button .cnt { opacity:.8; }
+
+  /* ====================== Modal ====================== */
+  .modal-mask { position: fixed; inset: 0; background: rgba(0,0,0,.45); display: none; align-items: center; justify-content: center; z-index: 100; padding: 16px; }
+  .modal-mask.show { display: flex; }
+  .modal { background: #fff; border-radius: 12px; width: 100%; max-width: 460px; max-height: 90vh; overflow-y: auto; box-shadow: 0 10px 40px rgba(0,0,0,.25); }
+  .modal h3 { padding: 18px 20px; border-bottom: 1px solid var(--border); font-size: 16px; }
+  .modal .body { padding: 20px; display: flex; flex-direction: column; gap: 14px; }
+  .modal .field { display: flex; flex-direction: column; gap: 5px; }
+  .modal .field label { font-size: 12px; color: var(--text-soft); }
+  .modal .field input, .modal .field select, .modal .field textarea {
+    padding: 9px; border: 1px solid var(--border); border-radius: 6px; font-size: 14px; font-family: inherit;
+  }
+  .modal .field input[readonly] { background: #f4f5f7; color: var(--text-soft); }
+  .modal .foot { padding: 14px 20px; border-top: 1px solid var(--border); display: flex; justify-content: flex-end; gap: 10px; }
+  .modal .hint { font-size: 12px; color: var(--text-soft); background: var(--primary-soft); padding: 10px; border-radius: 6px; }
+
+  /* ====================== 規則說明 ====================== */
+  .rules h2 { font-size: 16px; margin: 22px 0 10px; }
+  .rules h2:first-child { margin-top: 0; }
+  .rules p, .rules li { color: var(--text); margin-bottom: 6px; }
+  .rules ul { padding-left: 20px; }
+  .rule-item { display:flex; gap:10px; padding:10px 0; border-bottom:1px dashed var(--border); }
+  .rule-item .tag { flex-shrink:0; height: fit-content; }
+
+  /* ====================== Workflow stepper ====================== */
+  .stepper { display:flex; gap:6px; flex-wrap:wrap; align-items:center; }
+  .stepper .step { font-size:11px; padding:2px 8px; border-radius:12px; background:var(--grey-bg); color:var(--grey); }
+  .stepper .step.done { background:var(--green-bg); color:var(--green); }
+  .stepper .step.now { background:var(--primary); color:#fff; }
+  .stepper .arrow { color:var(--text-soft); font-size:11px; }
+
+  /* ====================== Toast ====================== */
+  #toast { position: fixed; right: 20px; bottom: 20px; display:flex; flex-direction:column; gap:8px; z-index:200; }
+  .toast-item { background:#1f2733; color:#fff; padding:12px 16px; border-radius:8px; font-size:13px; box-shadow:0 6px 20px rgba(0,0,0,.3); max-width:320px; white-space:pre-line; animation: slidein .2s; }
+  @keyframes slidein { from { transform: translateY(10px); opacity:0; } to { transform:none; opacity:1; } }
+
+  /* ====================== RWD ====================== */
+  @media (max-width: 860px) {
+    .sidebar { position: fixed; left: -240px; z-index: 50; transition: left .2s; }
+    .sidebar.open { left: 0; }
+    .menu-toggle { display: inline-block; }
+    .content { padding: 16px; }
+  }
+  .page { display: none; }
+  .page.active { display: block; }
+</style>
+</head>
+<body>
+<div class="layout">
+  <!-- ====================== 左側 Sidebar ====================== -->
+  <aside class="sidebar" id="sidebar">
+    <div class="brand">供應商門市招募平台<small>Store Recruitment Console</small></div>
+    <nav class="nav" id="nav">
+      <button data-page="dashboard" class="active">🏠 Dashboard 首頁</button>
+      <button data-page="stores">🏬 門市招募列表</button>
+      <button data-page="mine">📋 我的招募</button>
+      <button data-page="review">⏳ 待審清單 <span class="badge" id="navReviewBadge">0</span></button>
+      <button data-page="history">🕘 歷史紀錄</button>
+      <button data-page="rules">📖 規則說明</button>
+    </nav>
+    <div class="role-box">
+      <label>目前身份 (Demo 切換)</label>
+      <select id="roleSelect">
+        <optgroup label="供應商身份">
+          <!-- 由 JS 填入供應商 -->
+        </optgroup>
+        <optgroup label="營運身份">
+          <option value="ops">營運人員 (Ops)</option>
+        </optgroup>
+      </select>
+    </div>
+  </aside>
+
+  <!-- ====================== 主內容 ====================== -->
+  <div class="main">
+    <header class="topbar">
+      <button class="menu-toggle" onclick="document.getElementById('sidebar').classList.toggle('open')">☰</button>
+      <h1 id="pageTitle">Dashboard 首頁</h1>
+      <div class="who">目前身份：<b id="whoLabel"></b></div>
+    </header>
+    <div class="content">
+
+      <!-- ============== 1. Dashboard ============== -->
+      <section class="page active" id="page-dashboard">
+        <div class="kpi-grid" id="kpiGrid"></div>
+        <div class="filters" id="filters-dashboard"></div>
+        <div class="card">
+          <div class="card-head">門市招募狀態總覽</div>
+          <div class="table-wrap"><table id="dashTable"></table></div>
+        </div>
+      </section>
+
+      <!-- ============== 2. 門市招募列表 ============== -->
+      <section class="page" id="page-stores">
+        <div class="filters" id="filters-stores"></div>
+        <div class="card">
+          <div class="card-head">門市招募列表</div>
+          <div class="table-wrap"><table id="storesTable"></table></div>
+        </div>
+      </section>
+
+      <!-- ============== 3. 我的招募 ============== -->
+      <section class="page" id="page-mine">
+        <div class="card">
+          <div class="card-head">我的招募 <span id="mineSupplierName" style="color:var(--text-soft);font-weight:400;"></span></div>
+          <div class="table-wrap"><table id="mineTable"></table></div>
+        </div>
+      </section>
+
+      <!-- ============== 4. 待審清單 (營運用) ============== -->
+      <section class="page" id="page-review">
+        <div class="tabs" id="reviewTabs"></div>
+        <div class="card">
+          <div class="card-head">待審 / 已處理申請</div>
+          <div class="table-wrap"><table id="reviewTable"></table></div>
+        </div>
+      </section>
+
+      <!-- ============== 5. 歷史紀錄 ============== -->
+      <section class="page" id="page-history">
+        <div class="card">
+          <div class="card-head">歷史紀錄 (含供應商名稱，僅營運與紀錄可見)</div>
+          <div class="table-wrap"><table id="historyTable"></table></div>
+        </div>
+      </section>
+
+      <!-- ============== 6. 規則說明 ============== -->
+      <section class="page" id="page-rules">
+        <div class="card"><div class="card-head">規則說明</div>
+          <div class="rules" style="padding:18px 22px;" id="rulesBody"></div>
+        </div>
+      </section>
+
+    </div>
+  </div>
+</div>
+
+<!-- ====================== Modal ====================== -->
+<div class="modal-mask" id="modalMask">
+  <div class="modal">
+    <h3 id="modalTitle">標題</h3>
+    <div class="body" id="modalBody"></div>
+    <div class="foot">
+      <button class="btn" onclick="closeModal()">取消</button>
+      <button class="btn primary" id="modalSubmit">送出</button>
+    </div>
+  </div>
+</div>
+<div id="toast"></div>
+
+<script>
+/* ============================================================================
+   區塊 1：常數定義（門市狀態 / 招募進度）
+   ============================================================================ */
+
+// 門市狀態定義
+const STORE_STATUS = {
+  urgent:   { label: '🔥 急徵',     cls: 'red',   desc: '隨時可開店，需優先招募' },
+  open:     { label: '🟢 開放招募', cls: 'green', desc: '約 1 週後可開店，可開始招募' },
+  planning: { label: '⚪ 規劃中',   cls: 'grey',  desc: '約 3–4 週後開店，可提前建立人才庫' },
+  filled:   { label: '✅ 已補齊',   cls: 'green', desc: '招募完成，停止開放' },
+};
+
+// 招募進度定義 (stage)
+const PROGRESS = {
+  not_started: { label: '🟢 尚未開始',     cls: 'green',  desc: '尚無供應商開始招募，所有供應商皆可申請' },
+  started:     { label: '🟡 已有供應商開始招募', cls: 'yellow', desc: '保留 7 天，逾期未更新名額自動釋出', reserveHours: 24*7 },
+  confirmed:   { label: '🟠 已有供應商確認人選', cls: 'orange', desc: '帳號已建立完成，保留 48 小時等待報到程序', reserveHours: 48 },
+  onboard:     { label: '🔵 已有供應商確認報到日期', cls: 'blue', desc: '暫時關閉新的招募申請；若報到取消則重新開放' },
+  completed:   { label: '✅ 招募完成',     cls: 'green',  desc: '已完成招募，停止開放' },
+};
+
+// 申請動作 (action)
+const ACTION = {
+  apply:    '申請招募',
+  start:    '開始招募',
+  confirm:  '確認人選',
+  onboard:  '確認報到日期',
+  waitlist: '加入候補',
+  release:  '逾期釋出',
+  complete: '招募完成',
+};
+
+/* ============================================================================
+   區塊 2：模擬資料 (日後改由 Google Sheets 讀取)
+   TODO: 串接 — 把以下 array 改成 fetch(APPS_SCRIPT_URL) 取得的資料
+   ============================================================================ */
+
+// 城市 → 地區 對應（篩選連動用）
+const CITY_DISTRICTS = {
+  '台北市': ['信義區', '內湖區', '士林區'],
+  '新北市': ['板橋區', '新莊區', '三重區', '中和區'],
+  '桃園市': ['桃園區', '中壢區'],
+  '台中市': ['西屯區', '北屯區'],
+  '高雄市': ['前鎮區', '左營區'],
+};
+
+// 供應商（至少 5 家）
+let SUPPLIERS = ['宏運物流', '速達人力', '全聯運能', '台灣宅配通', '優選派遣'];
+
+// Store_Master（至少 8 間門市）
+// stage = 招募進度 key；status = 門市狀態 key
+let stores = [
+  { id:'HD001', city:'新北市', district:'板橋區', name:'板橋新板', type:'HD', volume:1800, need:3, status:'urgent',   stage:'not_started', openDate:'2026/06/28', remark:'可立即開店' },
+  { id:'HD002', city:'台北市', district:'信義區', name:'信義松高', type:'HD', volume:2400, need:4, status:'urgent',   stage:'started',     openDate:'2026/06/29', remark:'貨量大，需優先' },
+  { id:'SD003', city:'台北市', district:'內湖區', name:'內湖科技', type:'SD', volume:1500, need:2, status:'open',     stage:'confirmed',   openDate:'2026/07/03', remark:'科技園區需求' },
+  { id:'HD004', city:'新北市', district:'新莊區', name:'新莊副都心', type:'HD', volume:2000, need:3, status:'open',   stage:'onboard',     openDate:'2026/07/05', remark:'已確認報到' },
+  { id:'SD005', city:'桃園市', district:'中壢區', name:'中壢站前', type:'SD', volume:1200, need:2, status:'planning', stage:'not_started', openDate:'2026/07/18', remark:'規劃中可建人才庫' },
+  { id:'HD006', city:'台中市', district:'西屯區', name:'台中逢甲', type:'HD', volume:2600, need:4, status:'urgent',   stage:'not_started', openDate:'2026/07/01', remark:'夜市商圈高量' },
+  { id:'SD007', city:'高雄市', district:'前鎮區', name:'高雄夢時代', type:'SD', volume:1700, need:3, status:'open',   stage:'started',     openDate:'2026/07/08', remark:'' },
+  { id:'HD008', city:'新北市', district:'三重區', name:'三重重新', type:'HD', volume:900,  need:1, status:'filled',   stage:'completed',   openDate:'2026/06/20', remark:'已補齊團隊' },
+  { id:'SD009', city:'桃園市', district:'桃園區', name:'桃園藝文', type:'SD', volume:1400, need:2, status:'planning', stage:'not_started', openDate:'2026/07/22', remark:'提前布局' },
+];
+
+// 進行中的招募關係 (recruitments)：每筆 = 一家供應商在某門市的招募狀態
+// stage: started / confirmed / onboard / completed / waitlist
+// 由「已核准」的申請產生。pendingAction = 目前正在等待營運審核的動作（無則 null）。
+let recruitments = [
+  // 信義松高：宏運物流 已開始招募（核准後 7 天保留），示範倒數
+  { id:'R1', supplier:'宏運物流', storeId:'HD002', stage:'started',   reserveUntil: tsFromNow(24*6),  candidateCount:0, onboardDate:'', pendingAction:null },
+  // 內湖科技：速達人力 已確認人選（48h 保留）
+  { id:'R2', supplier:'速達人力', storeId:'SD003', stage:'confirmed', reserveUntil: tsFromNow(40),    candidateCount:2, onboardDate:'', pendingAction:null },
+  // 新莊副都心：全聯運能 已確認報到日期
+  { id:'R3', supplier:'全聯運能', storeId:'HD004', stage:'onboard',   reserveUntil: null,             candidateCount:3, onboardDate:'2026/07/05', pendingAction:null },
+  // 高雄夢時代：台灣宅配通 開始招募，但已逾期（示範逾期釋出）
+  { id:'R4', supplier:'台灣宅配通', storeId:'SD007', stage:'started', reserveUntil: tsFromNow(-12),    candidateCount:0, onboardDate:'', pendingAction:null },
+  // 三重重新：宏運物流 招募完成
+  { id:'R5', supplier:'宏運物流', storeId:'HD008', stage:'completed', reserveUntil: null,             candidateCount:1, onboardDate:'2026/06/20', pendingAction:null },
+];
+
+// 待審 / 已處理申請 (applications)
+// status: pending / approved / rejected
+let applications = [
+  { id:'A1', time:'2026/06/24 10:12', supplier:'優選派遣', storeId:'HD002', action:'waitlist', status:'pending',
+    note:'欲加入候補，已有 5 名儲備人力', candidateCount:0, onboardDate:'', onboardTime:'', accountStatus:'', reviewer:'' },
+  { id:'A2', time:'2026/06/24 14:30', supplier:'速達人力', storeId:'SD003', action:'onboard', status:'pending',
+    note:'人選已完成帳號，安排 7/4 報到', candidateCount:2, onboardDate:'2026/07/04', onboardTime:'09:00', accountStatus:'已建立完成', reviewer:'' },
+];
+
+// 歷史紀錄 (history log)
+let history = [
+  { time:'2026/06/20 09:00', supplier:'宏運物流', storeId:'HD008', action:'complete', approved:'核准', reviewer:'Ops-Amy', note:'三重重新團隊補齊' },
+  { time:'2026/06/22 11:20', supplier:'全聯運能', storeId:'HD004', action:'onboard',  approved:'核准', reviewer:'Ops-Amy', note:'確認 7/5 報到' },
+  { time:'2026/06/23 16:05', supplier:'宏運物流', storeId:'HD002', action:'apply',    approved:'核准', reviewer:'Ops-Ben', note:'核准開始招募，保留 7 天' },
+];
+
+// 目前登入身份：預設第一家供應商
+let currentRole = SUPPLIERS[0];   // 供應商名稱字串，或 'ops'
+let reviewTab = 'all';            // 待審清單目前 tab
+let idSeq = 100;                  // 流水號產生器
+
+/* ============================================================================
+   區塊 3：工具函式
+   ============================================================================ */
+function tsFromNow(hours){ return Date.now() + hours*3600*1000; }
+function nextId(prefix){ return prefix + (++idSeq); }
+function getStore(id){ return stores.find(s => s.id === id); }
+function isOps(){ return currentRole === 'ops'; }
+function nowStr(){
+  const d = new Date();
+  const p = n => String(n).padStart(2,'0');
+  return `${d.getFullYear()}/${p(d.getMonth()+1)}/${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+
+// 計算某門市目前「進行中」的招募（非完成、非候補）家數
+function activeCount(storeId){
+  return recruitments.filter(r => r.storeId===storeId && ['started','confirmed','onboard'].includes(r.stage)).length;
+}
+// 候補家數（含 pending 候補申請 + recruitments 中 waitlist）
+function waitlistCount(storeId){
+  const pend = applications.filter(a => a.storeId===storeId && a.action==='waitlist' && a.status==='pending').length;
+  const appr = recruitments.filter(r => r.storeId===storeId && r.stage==='waitlist').length;
+  return pend + appr;
+}
+// 取得某門市對外顯示的進度標籤（含 X 家供應商 / 候補數，不顯示名稱）
+function progressLabel(store){
+  const p = PROGRESS[store.stage];
+  let txt = p.label;
+  const n = activeCount(store.id);
+  if (store.stage === 'started')    txt = `🟡 已有 ${n} 家供應商開始招募`;
+  if (store.stage === 'confirmed')  txt = `🟠 已有 ${n} 家供應商確認人選`;
+  if (store.stage === 'onboard')    txt = `🔵 已有供應商確認報到日期`;
+  const w = waitlistCount(store.id);
+  return { html:`<span class="tag ${p.cls}">${txt}</span>` + (w>0 ? ` <span class="tag grey">候補中：${w} 家</span>` : ''), cls:p.cls };
+}
+// 判斷某門市是否仍可「申請招募」
+function canApply(store){
+  if (['filled'].includes(store.status)) return false;
+  if (['onboard','completed'].includes(store.stage)) return false; // 報到 / 完成 後關閉
+  return true;
+}
+// 判斷是否可「加入候補」：已有人保留但尚未進入 onboard
+function canWaitlist(store){
+  return ['started','confirmed'].includes(store.stage);
+}
+// 倒數顯示 + 逾期判斷
+function reserveInfo(r){
+  if (!r || !r.reserveUntil) return { text:'—', expired:false };
+  const diff = r.reserveUntil - Date.now();
+  if (diff <= 0) return { text:'已逾期', expired:true };
+  const h = Math.floor(diff/3600000), m = Math.floor((diff%3600000)/60000);
+  const d = Math.floor(h/24);
+  const text = d>0 ? `剩 ${d} 天 ${h%24} 小時` : `剩 ${h} 小時 ${m} 分`;
+  return { text, expired:false };
+}
+// 找出某供應商在某門市的招募關係
+function findRec(supplier, storeId){ return recruitments.find(r => r.supplier===supplier && r.storeId===storeId); }
+// 某供應商在某門市是否已有 pending 申請
+function hasPending(supplier, storeId){
+  return applications.some(a => a.supplier===supplier && a.storeId===storeId && a.status==='pending');
+}
+
+/* ============================================================================
+   區塊 4：SeaTalk 通知模擬
+   TODO: 串接 — 把 console.log 換成對 SeaTalk Webhook 的 fetch POST
+   範例：
+     fetch(SEATALK_WEBHOOK_URL, { method:'POST',
+       headers:{'Content-Type':'application/json'},
+       body: JSON.stringify({ text: message }) });
+   ============================================================================ */
+function sendSeaTalkNotification(message){
+  console.log('%c[SeaTalk 通知]\n' + message, 'color:#ee4d2d');
+  // 也可在此推播給 #ops 群組
+}
+
+/* ============================================================================
+   區塊 5：Toast 提示
+   ============================================================================ */
+function toast(msg){
+  const box = document.getElementById('toast');
+  const el = document.createElement('div');
+  el.className = 'toast-item';
+  el.textContent = msg;
+  box.appendChild(el);
+  setTimeout(() => el.remove(), 4000);
+}
+
+/* ============================================================================
+   區塊 6：導覽切換
+   ============================================================================ */
+const PAGE_TITLES = { dashboard:'Dashboard 首頁', stores:'門市招募列表', mine:'我的招募', review:'待審清單', history:'歷史紀錄', rules:'規則說明' };
+function gotoPage(page){
+  document.querySelectorAll('.nav button').forEach(b => b.classList.toggle('active', b.dataset.page===page));
+  document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+  document.getElementById('page-'+page).classList.add('active');
+  document.getElementById('pageTitle').textContent = PAGE_TITLES[page];
+  document.getElementById('sidebar').classList.remove('open');
+  renderAll();
+}
+document.getElementById('nav').addEventListener('click', e => {
+  const btn = e.target.closest('button[data-page]');
+  if (btn) gotoPage(btn.dataset.page);
+});
+
+/* ============================================================================
+   區塊 7：篩選器（城市↔地區連動）
+   ============================================================================ */
+let filterState = { city:'', district:'', type:'', status:'', stage:'', q:'' };
+
+function buildFilters(containerId){
+  const c = document.getElementById(containerId);
+  c.innerHTML = `
+    <div class="field"><label>城市</label>
+      <select data-f="city"><option value="">全部城市</option>${Object.keys(CITY_DISTRICTS).map(x=>`<option ${filterState.city===x?'selected':''}>${x}</option>`).join('')}</select></div>
+    <div class="field"><label>地區</label>
+      <select data-f="district"><option value="">全部地區</option>${districtOptions()}</select></div>
+    <div class="field"><label>門市類型</label>
+      <select data-f="type"><option value="">全部類型</option><option ${filterState.type==='HD'?'selected':''}>HD</option><option ${filterState.type==='SD'?'selected':''}>SD</option></select></div>
+    <div class="field"><label>門市狀態</label>
+      <select data-f="status"><option value="">全部狀態</option>${Object.entries(STORE_STATUS).map(([k,v])=>`<option value="${k}" ${filterState.status===k?'selected':''}>${v.label}</option>`).join('')}</select></div>
+    <div class="field"><label>招募進度</label>
+      <select data-f="stage"><option value="">全部進度</option>${Object.entries(PROGRESS).map(([k,v])=>`<option value="${k}" ${filterState.stage===k?'selected':''}>${v.label}</option>`).join('')}</select></div>
+    <div class="field"><label>搜尋門市名稱</label>
+      <input data-f="q" placeholder="輸入門市名稱…" value="${filterState.q}"></div>
+    <button class="btn reset" onclick="resetFilters()">清除篩選</button>
+  `;
+  c.querySelectorAll('[data-f]').forEach(el => {
+    const ev = el.tagName==='INPUT' ? 'input' : 'change';
+    el.addEventListener(ev, () => {
+      filterState[el.dataset.f] = el.value;
+      if (el.dataset.f==='city') filterState.district = ''; // 城市改變時清空地區
+      renderAll();
+    });
+  });
+}
+function districtOptions(){
+  const list = filterState.city ? CITY_DISTRICTS[filterState.city] : Object.values(CITY_DISTRICTS).flat();
+  return list.map(d=>`<option ${filterState.district===d?'selected':''}>${d}</option>`).join('');
+}
+function resetFilters(){ filterState = { city:'', district:'', type:'', status:'', stage:'', q:'' }; renderAll(); }
+function applyFilters(list){
+  return list.filter(s =>
+    (!filterState.city || s.city===filterState.city) &&
+    (!filterState.district || s.district===filterState.district) &&
+    (!filterState.type || s.type===filterState.type) &&
+    (!filterState.status || s.status===filterState.status) &&
+    (!filterState.stage || s.stage===filterState.stage) &&
+    (!filterState.q || s.name.includes(filterState.q))
+  );
+}
+
+/* ============================================================================
+   區塊 8：渲染 — KPI
+   ============================================================================ */
+function renderKPI(){
+  const urgent = stores.filter(s=>s.status==='urgent').length;
+  const open   = stores.filter(s=>s.status==='open').length;
+  const plan   = stores.filter(s=>s.status==='planning').length;
+  const volume = stores.reduce((a,s)=>a+s.volume,0);
+  const need   = stores.reduce((a,s)=>a+s.need,0);
+  const pend   = applications.filter(a=>a.status==='pending').length;
+  const cards = [
+    {l:'🔥 急徵門市數', v:urgent}, {l:'🟢 開放招募門市數', v:open}, {l:'⚪ 規劃中門市數', v:plan},
+    {l:'📦 預估總貨量', v:volume.toLocaleString()}, {l:'👥 總需求人數', v:need},
+    {l:'⏳ 待審申請數', v:pend, accent:true},
+  ];
+  document.getElementById('kpiGrid').innerHTML = cards.map(c=>
+    `<div class="kpi ${c.accent?'accent':''}"><div class="label">${c.l}</div><div class="value">${c.v}</div></div>`).join('');
+}
+
+/* ============================================================================
+   區塊 9：渲染 — 門市表格（Dashboard & 門市列表共用）
+   ============================================================================ */
+function storeRowActions(store){
+  // 營運：可確認完成 / 釋出逾期
+  if (isOps()){
+    let btns = '';
+    if (store.stage !== 'completed' && store.status !== 'filled')
+      btns += `<button class="btn success sm" onclick="opsComplete('${store.id}')">確認完成</button>`;
+    // 是否有逾期保留
+    const expired = recruitments.find(r=>r.storeId===store.id && reserveInfo(r).expired && ['started','confirmed'].includes(r.stage));
+    if (expired)
+      btns += `<button class="btn danger sm" onclick="opsRelease('${expired.id}')">釋出逾期名額</button>`;
+    return btns || '<span style="color:var(--text-soft)">—</span>';
+  }
+  // 供應商視角
+  const rec = findRec(currentRole, store.id);
+  if (rec && rec.stage!=='waitlist'){
+    return `<button class="btn sm" onclick="gotoPage('mine')">前往我的招募</button>`;
+  }
+  if (hasPending(currentRole, store.id)){
+    return `<span class="tag grey">等待審核</span>`;
+  }
+  let btns = '';
+  if (canApply(store)) btns += `<button class="btn primary sm" onclick="openApply('${store.id}')">申請招募</button>`;
+  if (canWaitlist(store)) btns += `<button class="btn sm" onclick="openWaitlist('${store.id}')">加入候補</button>`;
+  return btns || '<span style="color:var(--text-soft)">已關閉</span>';
+}
+
+function renderStoreTable(tableId){
+  const rows = applyFilters(stores);
+  const head = `<thead><tr>
+    <th>門市</th><th>城市</th><th>地區</th><th>類型</th><th>預估貨量</th><th>需求人數</th>
+    <th>門市狀態</th><th>招募進度</th><th>預計開店日</th><th>操作</th></tr></thead>`;
+  const body = rows.length ? rows.map(s=>{
+    const st = STORE_STATUS[s.status];
+    return `<tr>
+      <td><b>${s.name}</b><br><span style="color:var(--text-soft);font-size:11px">${s.id}</span></td>
+      <td>${s.city}</td><td>${s.district}</td><td>${s.type}</td>
+      <td>${s.volume.toLocaleString()}</td><td>${s.need}</td>
+      <td><span class="tag ${st.cls}">${st.label}</span></td>
+      <td>${progressLabel(s).html}</td>
+      <td>${s.openDate}</td>
+      <td><div class="btn-group">${storeRowActions(s)}</div></td>
+    </tr>`;
+  }).join('') : `<tr><td colspan="10" class="empty">沒有符合條件的門市</td></tr>`;
+  document.getElementById(tableId).innerHTML = head + `<tbody>${body}</tbody>`;
+}
+
+/* ============================================================================
+   區塊 10：渲染 — 我的招募
+   ============================================================================ */
+const STAGE_ORDER = ['applied','started','confirmed','onboard','completed'];
+const STAGE_LABEL = { applied:'申請招募', started:'開始招募', confirmed:'確認人選', onboard:'確認報到日期', completed:'招募完成' };
+
+function stepper(currentStage){
+  // currentStage 為 recruitment.stage；applied 視為 started 之前
+  const idx = STAGE_ORDER.indexOf(currentStage==='waitlist' ? 'applied' : currentStage);
+  return '<div class="stepper">' + STAGE_ORDER.map((s,i)=>{
+    let cls = i<idx ? 'done' : (i===idx ? 'now' : '');
+    return `<span class="step ${cls}">${i+1} ${STAGE_LABEL[s]}</span>` + (i<STAGE_ORDER.length-1?'<span class="arrow">→</span>':'');
+  }).join('') + '</div>';
+}
+
+function mineNextAction(rec, store){
+  if (rec.pendingAction){
+    return `<span class="tag grey">⏳ 待審：${ACTION[rec.pendingAction]}</span>`;
+  }
+  const info = reserveInfo(rec);
+  switch(rec.stage){
+    case 'waitlist':
+      return `<span class="tag grey">候補中，等待釋出</span>`;
+    case 'started':
+      return `<button class="btn primary sm" onclick="openConfirm('${rec.id}')">確認人選</button>`
+        + (info.expired ? ` <span class="tag expired">已逾期，待營運處理</span>` : '');
+    case 'confirmed':
+      return `<button class="btn primary sm" onclick="openOnboard('${rec.id}')">回報報到日期</button>`
+        + (info.expired ? ` <span class="tag expired">已逾期，待營運處理</span>` : '');
+    case 'onboard':
+      return `<span class="tag blue">等待營運確認完成</span>`;
+    case 'completed':
+      return `<span class="tag green">✅ 已完成</span>`;
+  }
+  return '—';
+}
+
+function renderMine(){
+  document.getElementById('mineSupplierName').textContent = isOps() ? '（營運身份：顯示所有供應商招募）' : '（' + currentRole + '）';
+  // 供應商：自己的；營運：全部
+  let recs = recruitments.filter(r => isOps() ? true : r.supplier===currentRole);
+  // 也納入「尚在待審、還沒成立 recruitment」的申請（例如剛申請招募）
+  const pendingApplies = applications.filter(a => a.status==='pending'
+      && (isOps() || a.supplier===currentRole)
+      && !findRec(a.supplier, a.storeId));
+  const head = `<thead><tr><th>門市</th><th>城市</th><th>地區</th>${isOps()?'<th>供應商</th>':''}<th>我的狀態 / 流程</th><th>保留截止</th><th>下一步操作</th></tr></thead>`;
+  let rowsHtml = '';
+  recs.forEach(r=>{
+    const s = getStore(r.storeId); if(!s) return;
+    const info = reserveInfo(r);
+    rowsHtml += `<tr>
+      <td><b>${s.name}</b><br><span style="color:var(--text-soft);font-size:11px">${s.id}</span></td>
+      <td>${s.city}</td><td>${s.district}</td>
+      ${isOps()?`<td>${r.supplier}</td>`:''}
+      <td>${stepper(r.stage)}</td>
+      <td>${ r.reserveUntil ? `${info.text}` : '—' }</td>
+      <td>${mineNextAction(r, s)}</td>
+    </tr>`;
+  });
+  pendingApplies.forEach(a=>{
+    const s = getStore(a.storeId); if(!s) return;
+    rowsHtml += `<tr>
+      <td><b>${s.name}</b><br><span style="color:var(--text-soft);font-size:11px">${s.id}</span></td>
+      <td>${s.city}</td><td>${s.district}</td>
+      ${isOps()?`<td>${a.supplier}</td>`:''}
+      <td>${stepper('applied')}</td>
+      <td>—</td>
+      <td><span class="tag grey">⏳ 等待審核：${ACTION[a.action]}</span></td>
+    </tr>`;
+  });
+  if (!rowsHtml) rowsHtml = `<tr><td colspan="${isOps()?7:6}" class="empty">目前沒有招募紀錄，請至「門市招募列表」申請。</td></tr>`;
+  document.getElementById('mineTable').innerHTML = head + `<tbody>${rowsHtml}</tbody>`;
+}
+
+/* ============================================================================
+   區塊 11：渲染 — 待審清單（營運）
+   ============================================================================ */
+const REVIEW_TABS = [
+  { k:'all', l:'全部' }, { k:'apply', l:'申請招募' }, { k:'start', l:'開始招募' },
+  { k:'confirm', l:'確認人選' }, { k:'onboard', l:'確認報到日期' }, { k:'waitlist', l:'候補' }, { k:'release', l:'逾期釋出' },
+];
+function renderReviewTabs(){
+  const pend = applications.filter(a=>a.status==='pending');
+  document.getElementById('reviewTabs').innerHTML = REVIEW_TABS.map(t=>{
+    const cnt = t.k==='all' ? pend.length : pend.filter(a=>a.action===t.k).length;
+    return `<button class="${reviewTab===t.k?'active':''}" onclick="reviewTab='${t.k}';renderAll()">${t.l} <span class="cnt">(${cnt})</span></button>`;
+  }).join('');
+}
+function renderReview(){
+  if (!isOps()){
+    document.getElementById('reviewTable').innerHTML = `<tbody><tr><td class="empty">此分頁僅供營運人員使用，請於左下角切換為「營運人員」身份。</td></tr></tbody>`;
+    return;
+  }
+  let list = applications.filter(a => reviewTab==='all' ? true : a.action===reviewTab);
+  // 待審優先排序
+  list = list.slice().sort((a,b)=> (a.status==='pending'?0:1) - (b.status==='pending'?0:1));
+  const head = `<thead><tr><th>申請時間</th><th>供應商</th><th>Store ID</th><th>門市</th><th>申請動作</th><th>備註</th><th>狀態</th><th>操作</th></tr></thead>`;
+  const body = list.length ? list.map(a=>{
+    const s = getStore(a.storeId);
+    const statusTag = a.status==='pending' ? '<span class="tag yellow">待審</span>'
+      : a.status==='approved' ? '<span class="tag green">已核准</span>' : '<span class="tag red">已拒絕</span>';
+    const ops = a.status==='pending'
+      ? `<div class="btn-group"><button class="btn success sm" onclick="approve('${a.id}')">核准</button>
+         <button class="btn danger sm" onclick="reject('${a.id}')">拒絕</button></div>`
+      : `<span style="color:var(--text-soft)">${a.reviewer||''}</span>`;
+    return `<tr>
+      <td>${a.time}</td><td><b>${a.supplier}</b></td><td>${a.storeId}</td><td>${s?s.name:'-'}</td>
+      <td><span class="tag blue">${ACTION[a.action]}</span></td>
+      <td class="note-cell">${a.note||'—'}${a.candidateCount?`<br>人選數：${a.candidateCount}`:''}${a.onboardDate?`<br>報到：${a.onboardDate} ${a.onboardTime||''}`:''}</td>
+      <td>${statusTag}</td><td>${ops}</td>
+    </tr>`;
+  }).join('') : `<tr><td colspan="8" class="empty">此分類目前沒有申請</td></tr>`;
+  document.getElementById('reviewTable').innerHTML = head + `<tbody>${body}</tbody>`;
+}
+
+/* ============================================================================
+   區塊 12：渲染 — 歷史紀錄
+   ============================================================================ */
+function renderHistory(){
+  const head = `<thead><tr><th>時間</th><th>供應商</th><th>Store ID</th><th>門市</th><th>動作</th><th>核准狀態</th><th>核准人</th><th>備註</th></tr></thead>`;
+  const list = history.slice().reverse();
+  const body = list.length ? list.map(h=>{
+    const s = getStore(h.storeId);
+    const cls = h.approved==='核准' ? 'green' : h.approved==='拒絕' ? 'red' : 'grey';
+    return `<tr><td>${h.time}</td><td>${h.supplier}</td><td>${h.storeId}</td><td>${s?s.name:'-'}</td>
+      <td><span class="tag blue">${ACTION[h.action]||h.action}</span></td>
+      <td><span class="tag ${cls}">${h.approved}</span></td><td>${h.reviewer}</td><td class="note-cell">${h.note||'—'}</td></tr>`;
+  }).join('') : `<tr><td colspan="8" class="empty">尚無歷史紀錄</td></tr>`;
+  document.getElementById('historyTable').innerHTML = head + `<tbody>${body}</tbody>`;
+}
+function logHistory(supplier, storeId, action, approved, note){
+  history.push({ time: nowStr(), supplier, storeId, action, approved, reviewer: 'Ops', note: note||'' });
+}
+
+/* ============================================================================
+   區塊 13：渲染 — 規則說明
+   ============================================================================ */
+function renderRules(){
+  const statusRules = Object.values(STORE_STATUS).map(v=>`<div class="rule-item"><span class="tag ${v.cls}">${v.label}</span><div>${v.desc}</div></div>`).join('');
+  const progressRules = Object.values(PROGRESS).map(v=>`<div class="rule-item"><span class="tag ${v.cls}">${v.label}</span><div>${v.desc}</div></div>`).join('');
+  document.getElementById('rulesBody').innerHTML = `
+    <h2>一、門市狀態定義</h2>${statusRules}
+    <h2>二、招募進度定義</h2>${progressRules}
+    <h2>三、招募流程</h2>
+    <p>① 申請招募 → ② 開始招募 → ③ 確認人選（帳號已建立完成）→ ④ 確認報到日期 → ⑤ 招募完成（營運確認）</p>
+    <p>每次進度更新都會進入「待審」，營運核准後才會正式更新公開狀態。</p>
+    <h2>四、逾期釋出規則</h2>
+    <ul>
+      <li>🟡 開始招募：核准後保留 <b>7 天</b>，若未更新為「確認人選」則逾期，營運可手動釋出。</li>
+      <li>🟠 確認人選：核准後保留 <b>48 小時</b>，若未更新「報到日期」則逾期，營運可手動釋出。</li>
+      <li>釋出後 Dashboard 回到 🟢 尚未開始；若有候補，依申請順序由下一位候補取得機會。</li>
+    </ul>
+    <h2>五、候補機制</h2>
+    <p>門市已有供應商保留但尚未進入 🔵 確認報到日期前，其他供應商仍可「加入候補」。對外只顯示候補家數（例如「候補中：2 家供應商」），不顯示供應商名稱。</p>
+    <h2>六、隱私原則</h2>
+    <p>對外 Dashboard 只顯示「X 家供應商」，<b>不顯示供應商名稱</b>。供應商名稱僅在「待審清單」與「歷史紀錄」中對營運可見。</p>
+  `;
+}
+
+/* ============================================================================
+   區塊 14：Modal 控制
+   ============================================================================ */
+let modalSubmitHandler = null;
+function openModal(title, bodyHtml, onSubmit, submitText){
+  document.getElementById('modalTitle').textContent = title;
+  document.getElementById('modalBody').innerHTML = bodyHtml;
+  document.getElementById('modalSubmit').textContent = submitText || '送出';
+  modalSubmitHandler = onSubmit;
+  document.getElementById('modalMask').classList.add('show');
+}
+function closeModal(){ document.getElementById('modalMask').classList.remove('show'); modalSubmitHandler=null; }
+document.getElementById('modalSubmit').addEventListener('click', ()=>{ if(modalSubmitHandler) modalSubmitHandler(); });
+document.getElementById('modalMask').addEventListener('click', e=>{ if(e.target.id==='modalMask') closeModal(); });
+
+function supplierName(){ return isOps() ? '（請以供應商身份操作）' : currentRole; }
+
+/* ---- 申請招募 ---- */
+function openApply(storeId){
+  const s = getStore(storeId);
+  openModal('申請招募', `
+    <div class="field"><label>供應商名稱</label><input id="m_supplier" value="${supplierName()}" ${isOps()?'':'readonly'}></div>
+    <div class="field"><label>門市名稱</label><input value="${s.name}（${s.id}）" readonly></div>
+    <div class="field"><label>申請動作</label><input value="申請招募" readonly></div>
+    <div class="field"><label>備註 / 招募計畫</label><textarea id="m_note" rows="3" placeholder="例如：已有 3 名儲備人力，預計一週內到位"></textarea></div>
+    <div class="hint">送出後將新增一筆待審申請，營運會收到 SeaTalk 通知。</div>
+  `, ()=> submitApplication(storeId, 'apply'));
+}
+/* ---- 加入候補 ---- */
+function openWaitlist(storeId){
+  const s = getStore(storeId);
+  openModal('加入候補', `
+    <div class="field"><label>供應商名稱</label><input id="m_supplier" value="${supplierName()}" ${isOps()?'':'readonly'}></div>
+    <div class="field"><label>門市名稱</label><input value="${s.name}（${s.id}）" readonly></div>
+    <div class="field"><label>申請動作</label><input value="加入候補" readonly></div>
+    <div class="field"><label>備註</label><textarea id="m_note" rows="3" placeholder="若目前保留逾期或被拒絕，將依申請順序取得機會"></textarea></div>
+    <div class="hint">此門市已有供應商保留，您可加入候補。送出後進入待審。</div>
+  `, ()=> submitApplication(storeId, 'waitlist'));
+}
+/* ---- 確認人選 ---- */
+function openConfirm(recId){
+  const r = recruitments.find(x=>x.id===recId); const s = getStore(r.storeId);
+  openModal('確認人選（帳號已建立完成）', `
+    <div class="field"><label>供應商名稱</label><input value="${r.supplier}" readonly></div>
+    <div class="field"><label>門市</label><input value="${s.name}（${s.id}）" readonly></div>
+    <div class="field"><label>人選數量</label><input id="m_count" type="number" min="1" value="${s.need}"></div>
+    <div class="field"><label>帳號建立狀態</label><input value="已建立完成" readonly></div>
+    <div class="field"><label>備註</label><textarea id="m_note" rows="2"></textarea></div>
+    <div class="hint">送出後進入待審，營運核准後 Dashboard 顯示「🟠 已有 X 家供應商確認人選」，保留 48 小時。</div>
+  `, ()=> submitReport(recId, 'confirm'));
+}
+/* ---- 回報報到日期 ---- */
+function openOnboard(recId){
+  const r = recruitments.find(x=>x.id===recId); const s = getStore(r.storeId);
+  openModal('回報報到日期', `
+    <div class="field"><label>供應商名稱</label><input value="${r.supplier}" readonly></div>
+    <div class="field"><label>門市</label><input value="${s.name}（${s.id}）" readonly></div>
+    <div class="field"><label>報到日期</label><input id="m_date" type="date"></div>
+    <div class="field"><label>報到時間</label><input id="m_time" type="time" value="09:00"></div>
+    <div class="field"><label>備註</label><textarea id="m_note" rows="2"></textarea></div>
+    <div class="hint">送出後進入待審，營運核准後 Dashboard 顯示「🔵 已有供應商確認報到日期」，此門市暫時關閉新申請。</div>
+  `, ()=> submitReport(recId, 'onboard'));
+}
+
+/* ============================================================================
+   區塊 15：供應商送出 — 新申請 / 進度回報
+   ============================================================================ */
+function submitApplication(storeId, action){
+  const supplier = (document.getElementById('m_supplier')?.value || currentRole).trim();
+  if (isOps() && !supplier){ alert('請輸入供應商名稱'); return; }
+  const note = document.getElementById('m_note')?.value || '';
+  if (hasPending(supplier, storeId)){ alert('此門市已有一筆待審申請，請等待營運處理。'); return; }
+  applications.push({ id: nextId('A'), time: nowStr(), supplier, storeId, action, status:'pending',
+    note, candidateCount:0, onboardDate:'', onboardTime:'', accountStatus:'', reviewer:'' });
+  const s = getStore(storeId);
+  const msg = `📢 新增待審申請\n供應商：${supplier}\n門市：${s.name}\n動作：${ACTION[action]}\n時間：${nowStr()}\n請至待審清單核准。`;
+  sendSeaTalkNotification(msg);
+  closeModal();
+  alert('已送出申請，營運將收到 SeaTalk 通知。');
+  toast('✅ 申請已送出，狀態：待審');
+  renderAll();
+}
+
+function submitReport(recId, action){
+  const r = recruitments.find(x=>x.id===recId);
+  const note = document.getElementById('m_note')?.value || '';
+  const candidateCount = parseInt(document.getElementById('m_count')?.value || '0') || 0;
+  const onboardDate = document.getElementById('m_date')?.value || '';
+  const onboardTime = document.getElementById('m_time')?.value || '';
+  if (action==='onboard' && !onboardDate){ alert('請選擇報到日期'); return; }
+  // 建立待審申請，並在 recruitment 標記 pendingAction
+  applications.push({ id: nextId('A'), time: nowStr(), supplier:r.supplier, storeId:r.storeId, action, status:'pending',
+    note, candidateCount, onboardDate: onboardDate ? onboardDate.replaceAll('-','/') : '', onboardTime, accountStatus: action==='confirm'?'已建立完成':'', reviewer:'' });
+  r.pendingAction = action;
+  const s = getStore(r.storeId);
+  sendSeaTalkNotification(`📢 新增待審申請\n供應商：${r.supplier}\n門市：${s.name}\n動作：${ACTION[action]}\n時間：${nowStr()}\n請至待審清單核准。`);
+  closeModal();
+  alert('已送出回報，營運將收到 SeaTalk 通知。');
+  toast('✅ 進度回報已送出，狀態：待審');
+  renderAll();
+}
+
+/* ============================================================================
+   區塊 16：營運 — 核准 / 拒絕
+   ============================================================================ */
+function approve(appId){
+  const a = applications.find(x=>x.id===appId); if(!a) return;
+  const store = getStore(a.storeId);
+  a.status = 'approved'; a.reviewer = 'Ops';
+  // 依動作更新公開狀態 / recruitment
+  if (a.action==='apply' || a.action==='start'){
+    // 取得招募資格 → 開始招募；建立 / 更新 recruitment
+    let r = findRec(a.supplier, a.storeId);
+    if (!r){ r = { id: nextId('R'), supplier:a.supplier, storeId:a.storeId, stage:'started', candidateCount:0, onboardDate:'', pendingAction:null, reserveUntil:null }; recruitments.push(r); }
+    r.stage = 'started';
+    r.reserveUntil = tsFromNow(PROGRESS.started.reserveHours); // 保留 7 天
+    r.pendingAction = null;
+    if (store.stage==='not_started' || store.stage==='started') store.stage = 'started';
+    if (store.status==='planning') store.status = 'open';
+  }
+  else if (a.action==='confirm'){
+    const r = findRec(a.supplier, a.storeId);
+    if (r){ r.stage='confirmed'; r.candidateCount=a.candidateCount; r.reserveUntil = tsFromNow(PROGRESS.confirmed.reserveHours); r.pendingAction=null; }
+    store.stage = 'confirmed';
+  }
+  else if (a.action==='onboard'){
+    const r = findRec(a.supplier, a.storeId);
+    if (r){ r.stage='onboard'; r.onboardDate=a.onboardDate; r.reserveUntil=null; r.pendingAction=null; }
+    store.stage = 'onboard'; // 暫時關閉新申請
+  }
+  else if (a.action==='waitlist'){
+    // 加入候補：建立 waitlist recruitment（不影響公開進度，只增加候補數）
+    recruitments.push({ id: nextId('R'), supplier:a.supplier, storeId:a.storeId, stage:'waitlist', candidateCount:0, onboardDate:'', pendingAction:null, reserveUntil:null });
+  }
+  logHistory(a.supplier, a.storeId, a.action, '核准', a.note);
+  sendSeaTalkNotification(`✅ 已核准\n供應商：${a.supplier}\n門市：${store.name}\n動作：${ACTION[a.action]}`);
+  toast(`✅ 已核准：${a.supplier} - ${ACTION[a.action]}`);
+  renderAll();
+}
+
+function reject(appId){
+  const a = applications.find(x=>x.id===appId); if(!a) return;
+  a.status='rejected'; a.reviewer='Ops';
+  // 若是回報類動作，解除 recruitment 的 pending 標記（維持原 stage）
+  const r = findRec(a.supplier, a.storeId);
+  if (r && r.pendingAction===a.action) r.pendingAction = null;
+  logHistory(a.supplier, a.storeId, a.action, '拒絕', a.note);
+  toast(`已拒絕：${a.supplier} - ${ACTION[a.action]}`);
+  renderAll();
+}
+
+/* ============================================================================
+   區塊 17：營運 — 招募完成 / 逾期釋出
+   ============================================================================ */
+function opsComplete(storeId){
+  if (!confirm('確認此門市招募完成？將標記為 ✅ 招募完成 / 已補齊，並停止所有新申請。')) return;
+  const store = getStore(storeId);
+  store.stage='completed'; store.status='filled';
+  // 找出主要供應商（非候補）
+  const r = recruitments.find(x=>x.storeId===storeId && x.stage!=='waitlist' && x.stage!=='completed');
+  if (r){ r.stage='completed'; r.reserveUntil=null; r.pendingAction=null; }
+  logHistory(r?r.supplier:'-', storeId, 'complete', '核准', '營運確認招募完成');
+  sendSeaTalkNotification(`🎉 招募完成\n門市：${store.name}\n狀態更新為 ✅ 已補齊`);
+  toast(`🎉 ${store.name} 招募完成`);
+  renderAll();
+}
+
+function opsRelease(recId){
+  const r = recruitments.find(x=>x.id===recId); if(!r) return;
+  if (!confirm('確認釋出此逾期名額？Dashboard 將回到 🟢 尚未開始（或由候補遞補）。')) return;
+  const store = getStore(r.storeId);
+  const releasedSupplier = r.supplier;
+  // 移除逾期的 recruitment
+  recruitments = recruitments.filter(x=>x.id!==r.id);
+  logHistory(releasedSupplier, r.storeId, 'release', '核准', '逾期未更新，名額釋出');
+  // 是否有候補可遞補
+  const waiter = recruitments.find(x=>x.storeId===r.storeId && x.stage==='waitlist');
+  if (waiter){
+    // 候補遞補：轉為 started，重新計算 7 天
+    waiter.stage='started'; waiter.reserveUntil=tsFromNow(PROGRESS.started.reserveHours);
+    store.stage='started';
+    logHistory(waiter.supplier, r.storeId, 'apply', '核准', '由候補遞補，開始招募');
+    sendSeaTalkNotification(`♻️ 名額釋出並由候補遞補\n門市：${store.name}\n遞補供應商：${waiter.supplier}`);
+    toast(`♻️ ${store.name} 名額釋出，候補 ${waiter.supplier} 遞補`);
+  } else {
+    store.stage = activeCount(store.id)>0 ? 'started' : 'not_started';
+    sendSeaTalkNotification(`♻️ 逾期名額已釋出\n門市：${store.name}\n回到 🟢 尚未開始`);
+    toast(`♻️ ${store.name} 逾期名額已釋出`);
+  }
+  renderAll();
+}
+
+/* ============================================================================
+   區塊 18：身份切換
+   ============================================================================ */
+function buildRoleSelect(){
+  const sel = document.getElementById('roleSelect');
+  const supGroup = sel.querySelector('optgroup[label="供應商身份"]');
+  supGroup.innerHTML = SUPPLIERS.map(s=>`<option value="${s}">${s}</option>`).join('');
+  sel.value = currentRole;
+  sel.addEventListener('change', ()=>{ currentRole = sel.value; renderAll(); });
+}
+
+/* ============================================================================
+   區塊 19：總渲染
+   ============================================================================ */
+function renderAll(){
+  document.getElementById('whoLabel').textContent = isOps() ? '營運人員 (Ops)' : currentRole + '（供應商）';
+  const pend = applications.filter(a=>a.status==='pending').length;
+  document.getElementById('navReviewBadge').textContent = pend;
+  renderKPI();
+  buildFilters('filters-dashboard');
+  buildFilters('filters-stores');
+  renderStoreTable('dashTable');
+  renderStoreTable('storesTable');
+  renderMine();
+  renderReviewTabs();
+  renderReview();
+  renderHistory();
+}
+
+/* ============================================================================
+   區塊 20：初始化
+   ============================================================================ */
+buildRoleSelect();
+renderRules();
+renderAll();
+
+// 每分鐘重新計算倒數（逾期判斷）
+setInterval(renderAll, 60*1000);
+
+console.log('%c供應商門市招募平台 已載入','color:#ee4d2d;font-weight:bold');
+console.log('提示：左下角可切換身份（供應商 / 營運）。所有 SeaTalk 通知會印在此 Console。');
+</script>
+</body>
+</html>
