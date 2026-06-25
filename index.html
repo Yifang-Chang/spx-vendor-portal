@@ -180,6 +180,20 @@
   .toast-item { background:#1f2733; color:#fff; padding:12px 16px; border-radius:8px; font-size:13px; box-shadow:0 6px 20px rgba(0,0,0,.3); max-width:320px; white-space:pre-line; animation: slidein .2s; }
   @keyframes slidein { from { transform: translateY(10px); opacity:0; } to { transform:none; opacity:1; } }
 
+  /* ====================== 登入畫面 ====================== */
+  .login-mask { position: fixed; inset: 0; background: linear-gradient(135deg,#1f2733,#2c3645); display: flex; align-items: center; justify-content: center; z-index: 300; padding: 16px; }
+  .login-mask.hide { display: none; }
+  .login-box { background: #fff; border-radius: 14px; padding: 32px; width: 100%; max-width: 380px; box-shadow: 0 20px 60px rgba(0,0,0,.4); }
+  .login-box .logo { font-size: 20px; font-weight: 700; margin-bottom: 4px; }
+  .login-box .sub { color: var(--text-soft); font-size: 13px; margin-bottom: 22px; }
+  .login-box .field { display: flex; flex-direction: column; gap: 5px; margin-bottom: 14px; }
+  .login-box .field label { font-size: 12px; color: var(--text-soft); }
+  .login-box .field input { padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px; font-size: 14px; }
+  .login-box .field input:focus { outline: none; border-color: var(--primary); }
+  .login-err { color: var(--red); font-size: 13px; min-height: 18px; margin-bottom: 6px; }
+  .login-hint { margin-top: 18px; font-size: 11px; color: var(--text-soft); background: #f4f5f7; padding: 10px 12px; border-radius: 8px; line-height: 1.7; }
+  .login-hint b { color: var(--text); }
+
   /* ====================== RWD ====================== */
   @media (max-width: 860px) {
     .sidebar { position: fixed; left: -240px; z-index: 50; transition: left .2s; }
@@ -205,15 +219,9 @@
       <button data-page="rules">📖 規則說明</button>
     </nav>
     <div class="role-box">
-      <label>目前身份 (Demo 切換)</label>
-      <select id="roleSelect">
-        <optgroup label="供應商身份">
-          <!-- 由 JS 填入供應商 -->
-        </optgroup>
-        <optgroup label="營運身份">
-          <option value="ops">營運人員 (Ops)</option>
-        </optgroup>
-      </select>
+      <label>目前登入</label>
+      <div id="userInfo" style="color:#fff;font-weight:600;margin:4px 0 10px;">—</div>
+      <button class="btn" style="width:100%" onclick="logout()">登出</button>
     </div>
   </aside>
 
@@ -294,6 +302,19 @@
 </div>
 <div id="toast"></div>
 
+<!-- ====================== 登入畫面 ====================== -->
+<div class="login-mask" id="loginMask">
+  <div class="login-box">
+    <div class="logo">供應商門市招募平台</div>
+    <div class="sub">請輸入帳號密碼登入</div>
+    <div class="field"><label>帳號</label><input id="loginUser" placeholder="帳號" autocomplete="username"></div>
+    <div class="field"><label>密碼</label><input id="loginPass" type="password" placeholder="密碼" autocomplete="current-password"></div>
+    <div class="login-err" id="loginErr"></div>
+    <button class="btn primary" style="width:100%;padding:11px;" onclick="doLogin()">登入</button>
+    <div class="login-hint" id="loginHint"></div>
+  </div>
+</div>
+
 <script>
 /* ============================================================================
    區塊 1：常數定義（門市狀態 / 招募進度）
@@ -344,6 +365,18 @@ const CITY_DISTRICTS = {
 // 供應商（至少 5 家）
 let SUPPLIERS = ['宏運物流', '速達人力', '全聯運能', '台灣宅配通', '優選派遣'];
 
+// 帳號密碼（模擬 Google Sheet 的「帳號密碼」分頁）
+// TODO: 串接 — 改為從 Apps Script 讀取「帳號密碼」分頁，密碼建議在後端比對，不要明文放前端。
+//   分頁欄位建議：帳號 username | 密碼 password | 角色 role(supplier/ops) | 供應商 supplier | 顯示名稱 displayName
+let ACCOUNTS = [
+  { username:'hongyun', password:'1234',  role:'supplier', supplier:'宏運物流',   displayName:'宏運物流' },
+  { username:'suda',    password:'1234',  role:'supplier', supplier:'速達人力',   displayName:'速達人力' },
+  { username:'pxlogi',  password:'1234',  role:'supplier', supplier:'全聯運能',   displayName:'全聯運能' },
+  { username:'taiwan',  password:'1234',  role:'supplier', supplier:'台灣宅配通', displayName:'台灣宅配通' },
+  { username:'youxuan', password:'1234',  role:'supplier', supplier:'優選派遣',   displayName:'優選派遣' },
+  { username:'ops',     password:'admin', role:'ops',      supplier:'',           displayName:'營運人員 (Ops)' },
+];
+
 // Store_Master（至少 8 間門市）
 // stage = 招募進度 key；status = 門市狀態 key
 let stores = [
@@ -390,8 +423,9 @@ let history = [
   { time:'2026/06/23 16:05', supplier:'宏運物流', storeId:'HD002', action:'apply',    approved:'核准', reviewer:'Ops-Ben', note:'核准開始招募，保留 7 天' },
 ];
 
-// 目前登入身份：預設第一家供應商
-let currentRole = SUPPLIERS[0];   // 供應商名稱字串，或 'ops'
+// 目前登入身份：null = 尚未登入；登入後為供應商名稱字串，或 'ops'
+let currentRole = null;           // 由登入決定
+let currentUser = null;           // 目前登入的帳號物件
 let reviewTab = 'all';            // 待審清單目前 tab
 let idSeq = 100;                  // 流水號產生器
 
@@ -594,7 +628,9 @@ function storeRowActions(store){
 }
 
 function renderStoreTable(tableId){
-  const rows = applyFilters(stores);
+  // 依門市狀態排序：🔥 急徵 → 🟢 開放招募 → ⚪ 規劃中 → ✅ 已補齊
+  const STATUS_ORDER = { urgent:0, open:1, planning:2, filled:3 };
+  const rows = applyFilters(stores).slice().sort((a,b)=> (STATUS_ORDER[a.status]??9) - (STATUS_ORDER[b.status]??9));
   const head = `<thead><tr>
     <th>門市</th><th>城市</th><th>地區</th><th>類型</th><th>預估貨量</th><th>需求人數</th>
     <th>門市狀態</th><th>招募進度</th><th>預計開店日</th><th>操作</th></tr></thead>`;
@@ -787,13 +823,14 @@ function closeModal(){ document.getElementById('modalMask').classList.remove('sh
 document.getElementById('modalSubmit').addEventListener('click', ()=>{ if(modalSubmitHandler) modalSubmitHandler(); });
 document.getElementById('modalMask').addEventListener('click', e=>{ if(e.target.id==='modalMask') closeModal(); });
 
-function supplierName(){ return isOps() ? '（請以供應商身份操作）' : currentRole; }
+// 供應商名稱欄位：綁定目前登入身份，唯讀不可改（身份由登入決定）。
+function supplierField(){ return `<input value="${currentRole||''}" readonly>`; }
 
 /* ---- 申請招募 ---- */
 function openApply(storeId){
   const s = getStore(storeId);
   openModal('申請招募', `
-    <div class="field"><label>供應商名稱</label><input id="m_supplier" value="${supplierName()}" ${isOps()?'':'readonly'}></div>
+    <div class="field"><label>供應商名稱</label>${supplierField()}</div>
     <div class="field"><label>門市名稱</label><input value="${s.name}（${s.id}）" readonly></div>
     <div class="field"><label>申請動作</label><input value="申請招募" readonly></div>
     <div class="field"><label>備註 / 招募計畫</label><textarea id="m_note" rows="3" placeholder="例如：已有 3 名儲備人力，預計一週內到位"></textarea></div>
@@ -804,7 +841,7 @@ function openApply(storeId){
 function openWaitlist(storeId){
   const s = getStore(storeId);
   openModal('加入候補', `
-    <div class="field"><label>供應商名稱</label><input id="m_supplier" value="${supplierName()}" ${isOps()?'':'readonly'}></div>
+    <div class="field"><label>供應商名稱</label>${supplierField()}</div>
     <div class="field"><label>門市名稱</label><input value="${s.name}（${s.id}）" readonly></div>
     <div class="field"><label>申請動作</label><input value="加入候補" readonly></div>
     <div class="field"><label>備註</label><textarea id="m_note" rows="3" placeholder="若目前保留逾期或被拒絕，將依申請順序取得機會"></textarea></div>
@@ -840,8 +877,9 @@ function openOnboard(recId){
    區塊 15：供應商送出 — 新申請 / 進度回報
    ============================================================================ */
 function submitApplication(storeId, action){
-  const supplier = (document.getElementById('m_supplier')?.value || currentRole).trim();
-  if (isOps() && !supplier){ alert('請輸入供應商名稱'); return; }
+  // 供應商名稱一律取自登入身份，前端無法竄改
+  const supplier = isOps() ? '' : currentRole;
+  if (!supplier){ alert('請以供應商身份登入後再申請。'); return; }
   const note = document.getElementById('m_note')?.value || '';
   if (hasPending(supplier, storeId)){ alert('此門市已有一筆待審申請，請等待營運處理。'); return; }
   applications.push({ id: nextId('A'), time: nowStr(), supplier, storeId, action, status:'pending',
@@ -967,13 +1005,34 @@ function opsRelease(recId){
 /* ============================================================================
    區塊 18：身份切換
    ============================================================================ */
-function buildRoleSelect(){
-  const sel = document.getElementById('roleSelect');
-  const supGroup = sel.querySelector('optgroup[label="供應商身份"]');
-  supGroup.innerHTML = SUPPLIERS.map(s=>`<option value="${s}">${s}</option>`).join('');
-  sel.value = currentRole;
-  sel.addEventListener('change', ()=>{ currentRole = sel.value; renderAll(); });
+// 登入：驗證帳密 → 設定身份 → 進入系統
+// TODO: 串接 — 改為呼叫 Apps Script 驗證帳密，成功後回傳角色與供應商名稱。
+function doLogin(){
+  const u = document.getElementById('loginUser').value.trim();
+  const p = document.getElementById('loginPass').value;
+  const acc = ACCOUNTS.find(a => a.username===u && a.password===p);
+  if (!acc){ document.getElementById('loginErr').textContent = '帳號或密碼錯誤，請重新輸入。'; return; }
+  currentUser = acc;
+  currentRole = acc.role==='ops' ? 'ops' : acc.supplier; // 身份由登入決定，不可自選
+  document.getElementById('loginErr').textContent = '';
+  document.getElementById('loginPass').value = '';
+  document.getElementById('userInfo').textContent = acc.displayName + (acc.role==='ops' ? '' : '（供應商）');
+  document.getElementById('loginMask').classList.add('hide');
+  gotoPage('dashboard');
 }
+// 登出：清除身份，回到登入畫面
+function logout(){
+  currentUser = null; currentRole = null;
+  document.getElementById('loginUser').value = '';
+  document.getElementById('loginPass').value = '';
+  document.getElementById('loginErr').textContent = '';
+  document.getElementById('loginMask').classList.remove('hide');
+}
+// 登入畫面：Enter 鍵送出 + Demo 帳號提示
+document.getElementById('loginPass').addEventListener('keydown', e=>{ if(e.key==='Enter') doLogin(); });
+document.getElementById('loginUser').addEventListener('keydown', e=>{ if(e.key==='Enter') doLogin(); });
+document.getElementById('loginHint').innerHTML =
+  '<b>Demo 測試帳號</b><br>供應商：hongyun / suda / pxlogi / taiwan / youxuan（密碼皆 1234）<br>營運：ops（密碼 admin）';
 
 /* ============================================================================
    區塊 19：總渲染
@@ -996,15 +1055,14 @@ function renderAll(){
 /* ============================================================================
    區塊 20：初始化
    ============================================================================ */
-buildRoleSelect();
 renderRules();
-renderAll();
+// 預設顯示登入畫面；登入成功後 doLogin() 才會進入系統並 renderAll()。
 
-// 每分鐘重新計算倒數（逾期判斷）
-setInterval(renderAll, 60*1000);
+// 每分鐘重新計算倒數（逾期判斷）；未登入時 loginMask 仍蓋住，不影響。
+setInterval(()=>{ if(currentRole) renderAll(); }, 60*1000);
 
 console.log('%c供應商門市招募平台 已載入','color:#ee4d2d;font-weight:bold');
-console.log('提示：左下角可切換身份（供應商 / 營運）。所有 SeaTalk 通知會印在此 Console。');
+console.log('Demo 帳號 → 供應商：hongyun/suda/pxlogi/taiwan/youxuan（密碼 1234）；營運：ops（密碼 admin）。SeaTalk 通知會印在此 Console。');
 </script>
 </body>
 </html>
