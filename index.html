@@ -353,7 +353,7 @@ const ACTION = {
    ============================================================================ */
 // TODO: 串接 — 部署 Apps Script Web App（設定為「以我的身分執行 / 任何人可存取」）後，
 //        把產生的 /exec 網址貼到這裡。未填時前端無法登入（不再有任何前端假帳密）。
-const API_URL = 'https://script.google.com/macros/s/AKfycbzQr8I8SY3J0Hxr8zUvcRGWWMsylWLCjguWcl0RFDoomQw01ZuC9YsPzIwNpZvJmCL1/exec'; // 例：'https://script.google.com/macros/s/AKfycbxxxxxxxx/exec'
+const API_URL = ''; // 例：'https://script.google.com/macros/s/AKfycbxxxxxxxx/exec'
 
 /* ============================================================================
    區塊 2：模擬資料 (日後改由 Google Sheets 讀取)
@@ -857,7 +857,7 @@ async function submitApplication(storeId, action){
   try {
     const res = await apiCall('submitRequest', {
       vendor_id: currentVendorId, vendor_name: currentVendorName,
-      address: storeId, action, note
+      address: storeId, req_action: action, note   // 用 req_action 避免和 API 路由的 action 撞名
     });
     if (!res.success){ toast('⚠️ 送出失敗：' + (res.message||'')); return; }
     alert('已送出申請，營運將收到 SeaTalk 通知。');
@@ -878,7 +878,7 @@ async function submitReport(recId, action){
   try {
     const res = await apiCall('submitRequest', {
       vendor_id: currentVendorId, vendor_name: currentVendorName,
-      address: r.storeId, action, note,
+      address: r.storeId, req_action: action, note,   // 用 req_action 避免和 API 路由的 action 撞名
       candidate_count: candidateCount,
       onboard_date: onboardDateRaw ? onboardDateRaw.replaceAll('-','/') : '',
       onboard_time: onboardTime
