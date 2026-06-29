@@ -353,7 +353,7 @@ const ACTION = {
    ============================================================================ */
 // TODO: 串接 — 部署 Apps Script Web App（設定為「以我的身分執行 / 任何人可存取」）後，
 //        把產生的 /exec 網址貼到這裡。未填時前端無法登入（不再有任何前端假帳密）。
-const API_URL = 'https://script.google.com/macros/s/AKfycbwDEJ1hOK7unHKLLMl0-I2BtP1MMahEDtA7dFftF5Q3om2lKRk1j6tIJwdSuh5CYZf_/exec'; // 例：'https://script.google.com/macros/s/AKfycbxxxxxxxx/exec'
+const API_URL = ''; // 例：'https://script.google.com/macros/s/AKfycbxxxxxxxx/exec'
 
 /* ============================================================================
    區塊 2：模擬資料 (日後改由 Google Sheets 讀取)
@@ -623,15 +623,19 @@ function renderStoreTable(tableId){
 /* ============================================================================
    區塊 10：渲染 — 我的招募
    ============================================================================ */
-const STAGE_ORDER = ['applied','started','confirmed','onboard','completed'];
-const STAGE_LABEL = { applied:'申請招募', started:'開始招募', confirmed:'確認人選', onboard:'確認報到日期', completed:'招募完成' };
-
+// 新版供應商流程（3 步）：申請招募 → 確認報到日期 → 招募完成
+const STEP_LABELS = ['申請招募', '確認報到日期', '招募完成'];
+// 把 recruitment.stage 對應到 3 步顯示的目前步驟索引
+function stageStepIndex(stage){
+  if (stage === 'completed') return 2;                 // 招募完成
+  if (['started','onboard','confirmed'].includes(stage)) return 1; // 申請已核准，進行確認報到日期
+  return 0;                                            // applied / waitlist：申請招募
+}
 function stepper(currentStage){
-  // currentStage 為 recruitment.stage；applied 視為 started 之前
-  const idx = STAGE_ORDER.indexOf(currentStage==='waitlist' ? 'applied' : currentStage);
-  return '<div class="stepper">' + STAGE_ORDER.map((s,i)=>{
+  const idx = stageStepIndex(currentStage);
+  return '<div class="stepper">' + STEP_LABELS.map((label,i)=>{
     let cls = i<idx ? 'done' : (i===idx ? 'now' : '');
-    return `<span class="step ${cls}">${i+1} ${STAGE_LABEL[s]}</span>` + (i<STAGE_ORDER.length-1?'<span class="arrow">→</span>':'');
+    return `<span class="step ${cls}">${i+1} ${label}</span>` + (i<STEP_LABELS.length-1?'<span class="arrow">→</span>':'');
   }).join('') + '</div>';
 }
 
@@ -644,9 +648,7 @@ function mineNextAction(rec, store){
     case 'waitlist':
       return `<span class="tag grey">候補中，等待釋出</span>`;
     case 'started':
-      return `<button class="btn primary sm" onclick="openConfirm('${rec.id}')">確認人選</button>`
-        + (info.expired ? ` <span class="tag expired">已逾期，待營運處理</span>` : '');
-    case 'confirmed':
+      // 申請招募已核准 → 下一步由供應商回報報到日期（含人力資源表）
       return `<button class="btn primary sm" onclick="openOnboard('${rec.id}')">回報報到日期</button>`
         + (info.expired ? ` <span class="tag expired">已逾期，待營運處理</span>` : '');
     case 'onboard':
@@ -763,17 +765,16 @@ function renderRules(){
   document.getElementById('rulesBody').innerHTML = `
     <h2>一、門市狀態定義</h2>${statusRules}
     <h2>二、招募進度定義</h2>${progressRules}
-    <h2>三、招募流程</h2>
-    <p>① 申請招募 → ② 開始招募 → ③ 確認人選（帳號已建立完成）→ ④ 確認報到日期 → ⑤ 招募完成（營運確認）</p>
-    <p>每次進度更新都會進入「待審」，營運核准後才會正式更新公開狀態。</p>
+    <h2>三、招募流程（3 步）</h2>
+    <p>① 申請招募（供應商送出 → 營運核准）→ ② 確認報到日期（供應商填報到日期＋已填寫人力資源表）→ ③ 招募完成（營運確認報到日期即自動完成）</p>
+    <p>供應商送出申請或回報報到日期都會進入「待審」，營運核准後才正式更新公開狀態。</p>
     <h2>四、逾期釋出規則</h2>
     <ul>
-      <li>🟡 開始招募：核准後保留 <b>7 天</b>，若未更新為「確認人選」則逾期，營運可手動釋出。</li>
-      <li>🟠 確認人選：核准後保留 <b>48 小時</b>，若未更新「報到日期」則逾期，營運可手動釋出。</li>
+      <li>申請招募核准後保留 <b>7 天</b>，若未回報「報到日期」則逾期，營運可手動釋出。</li>
       <li>釋出後 Dashboard 回到 🟢 尚未開始；若有候補，依申請順序由下一位候補取得機會。</li>
     </ul>
     <h2>五、候補機制</h2>
-    <p>門市已有供應商保留但尚未進入 🔵 確認報到日期前，其他供應商仍可「加入候補」。對外只顯示候補家數（例如「候補中：2 家供應商」），不顯示供應商名稱。</p>
+    <p>門市已有供應商保留但尚未完成前，其他供應商仍可「加入候補」。對外只顯示候補家數（例如「候補中：2 家供應商」），不顯示供應商名稱。</p>
     <h2>六、隱私原則</h2>
     <p>對外 Dashboard 只顯示「X 家供應商」，<b>不顯示供應商名稱</b>。供應商名稱僅在「待審清單」與「歷史紀錄」中對營運可見。</p>
   `;
@@ -819,19 +820,7 @@ function openWaitlist(storeId){
     <div class="hint">此門市已有供應商保留，您可加入候補。送出後進入待審。</div>
   `, ()=> submitApplication(storeId, 'waitlist'));
 }
-/* ---- 確認人選 ---- */
-function openConfirm(recId){
-  const r = recruitments.find(x=>x.id===recId); const s = getStore(r.storeId);
-  openModal('確認人選（帳號已建立完成）', `
-    <div class="field"><label>供應商名稱</label><input value="${r.supplier}" readonly></div>
-    <div class="field"><label>門市</label><input value="${s.name}（${s.id}）" readonly></div>
-    <div class="field"><label>人選數量</label><input id="m_count" type="number" min="1" value="${s.need}"></div>
-    <div class="field"><label>帳號建立狀態</label><input value="已建立完成" readonly></div>
-    <div class="field"><label>備註</label><textarea id="m_note" rows="2"></textarea></div>
-    <div class="hint">送出後進入待審，營運核准後 Dashboard 顯示「🟠 已有 X 家供應商確認人選」，保留 48 小時。</div>
-  `, ()=> submitReport(recId, 'confirm'));
-}
-/* ---- 回報報到日期 ---- */
+/* ---- 回報報到日期（含人力資源表確認）---- */
 function openOnboard(recId){
   const r = recruitments.find(x=>x.id===recId); const s = getStore(r.storeId);
   openModal('回報報到日期', `
@@ -839,8 +828,9 @@ function openOnboard(recId){
     <div class="field"><label>門市</label><input value="${s.name}（${s.id}）" readonly></div>
     <div class="field"><label>報到日期</label><input id="m_date" type="date"></div>
     <div class="field"><label>報到時間</label><input id="m_time" type="time" value="09:00"></div>
+    <div class="field"><label><input type="checkbox" id="m_hr"> 已填寫人力資源表</label></div>
     <div class="field"><label>備註</label><textarea id="m_note" rows="2"></textarea></div>
-    <div class="hint">送出後進入待審，營運核准後 Dashboard 顯示「🔵 已有供應商確認報到日期」，此門市暫時關閉新申請。</div>
+    <div class="hint">送出後進入待審。營運確認後即「招募完成」。</div>
   `, ()=> submitReport(recId, 'onboard'));
 }
 
@@ -866,14 +856,18 @@ async function submitApplication(storeId, action){
   } catch(e){ console.error(e); toast('⚠️ 無法連線，送出失敗'); }
 }
 
-// 供應商：進度回報（確認人選 / 報到日期）→ 寫入 Recruitment_Request
+// 供應商：進度回報（報到日期）→ 寫入 Recruitment_Request
 async function submitReport(recId, action){
   const r = recruitments.find(x=>x.id===recId); if(!r) return;
-  const note = document.getElementById('m_note')?.value || '';
+  let note = document.getElementById('m_note')?.value || '';
   const candidateCount = parseInt(document.getElementById('m_count')?.value || '0') || 0;
   const onboardDateRaw = document.getElementById('m_date')?.value || '';
   const onboardTime = document.getElementById('m_time')?.value || '';
-  if (action==='onboard' && !onboardDateRaw){ alert('請選擇報到日期'); return; }
+  if (action==='onboard'){
+    if (!onboardDateRaw){ alert('請選擇報到日期'); return; }
+    if (!document.getElementById('m_hr')?.checked){ alert('請先勾選「已填寫人力資源表」'); return; }
+    note = '已填寫人力資源表；' + note;   // 記錄在備註，方便營運審核
+  }
   closeModal();
   try {
     const res = await apiCall('submitRequest', {
@@ -1055,8 +1049,7 @@ function rebuildRecruitments(){
       candidateCount:0, onboardDate:'', pendingAction:null });
     rec.requestId = a.id; // 以最新核准的 request 當釋出對象
     if (a.action==='apply' || a.action==='start'){ rec.stage='started';   rec.reserveUntil=a.reserveUntil; }
-    else if (a.action==='confirm'){ rec.stage='confirmed'; rec.reserveUntil=a.reserveUntil; rec.candidateCount=a.candidateCount; }
-    else if (a.action==='onboard'){ rec.stage='onboard';   rec.reserveUntil=null; rec.onboardDate=a.onboardDate; }
+    else if (a.action==='onboard'){ rec.stage='completed'; rec.reserveUntil=null; rec.onboardDate=a.onboardDate; } // 報到日期核准＝完成
     else if (a.action==='waitlist'){ rec.stage='waitlist'; }
     else if (a.action==='complete'){ rec.stage='completed'; rec.reserveUntil=null; }
   });
@@ -1064,6 +1057,11 @@ function rebuildRecruitments(){
   applications.filter(a => a.status==='pending').forEach(a=>{
     const key = a.vendorId + '|' + a.storeId;
     if (map[key]) map[key].pendingAction = a.action;
+  });
+  // 安全網：若門市已標記完成，該門市的招募一律顯示完成
+  Object.values(map).forEach(rec=>{
+    const s = getStore(rec.storeId);
+    if (s && s.stage==='completed' && rec.stage!=='waitlist') rec.stage='completed';
   });
   recruitments = Object.values(map);
 }
